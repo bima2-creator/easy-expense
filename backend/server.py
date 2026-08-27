@@ -2,6 +2,7 @@ import os
 import io
 import csv
 import re
+import time
 import uuid
 import json
 import base64
@@ -231,18 +232,33 @@ def ocr_space_read_text(image_bytes: bytes, content_type: str) -> str:
     ext = "jpg"
     if "png" in content_type:
         ext = "png"
-    resp = requests.post(
-        OCR_SPACE_URL,
-        files={"file": (f"receipt.{ext}", image_bytes, content_type)},
-        data={"apikey": OCR_SPACE_API_KEY, "language": "eng", "OCREngine": "2", "scale": "true"},
-        timeout=60,
-    )
-    resp.raise_for_status()
-    result = resp.json()
-    if result.get("IsErroredOnProcessing"):
-        raise RuntimeError(str(result.get("ErrorMessage") or "OCR gagal memproses gambar"))
-    parsed = result.get("ParsedResults") or []
-    return parsed[0].get("ParsedText", "") if parsed else ""
+
+    last_error = None
+    for attempt in range(3):  # coba sampai 3x, karena OCR.space free tier kadang 503 sesaat
+        try:
+            resp = requests.post(
+                OCR_SPACE_URL,
+                files={"file": (f"receipt.{ext}", image_bytes, content_type)},
+                data={"apikey": OCR_SPACE_API_KEY, "language": "eng", "OCREngine": "2", "scale": "true"},
+                timeout=60,
+            )
+            if resp.status_code in (503, 502, 504) and attempt < 2:
+                last_error = f"{resp.status_code} Server Error"
+                time.sleep(2)
+                continue
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("IsErroredOnProcessing"):
+                raise RuntimeError(str(result.get("ErrorMessage") or "OCR gagal memproses gambar"))
+            parsed = result.get("ParsedResults") or []
+            return parsed[0].get("ParsedText", "") if parsed else ""
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            if attempt < 2:
+                time.sleep(2)
+                continue
+            raise
+    raise RuntimeError(last_error or "OCR gagal setelah beberapa percobaan")
 
 
 def _parse_amount_token(tok: str) -> Optional[float]:
