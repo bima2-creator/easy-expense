@@ -194,7 +194,7 @@ class ExpenseUpdate(BaseModel):
 # Receipt extraction: OCR.space (free tier, no local ML needed) + heuristic parsing
 # ---------------------------------------------------------------------------
 OCR_SPACE_API_KEY = os.environ.get('OCR_SPACE_API_KEY')
-OCR_SPACE_URL = "https://apipro1.ocr.space/parse/image"
+OCR_SPACE_URL = "https://api.ocr.space/parse/image"
 
 # Kata kunci per kategori untuk menebak kategori dari isi struk (Bahasa Indonesia + umum)
 CATEGORY_KEYWORDS = {
