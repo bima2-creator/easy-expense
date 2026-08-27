@@ -264,6 +264,9 @@ def _parse_amount_token(tok: str) -> Optional[float]:
     return val
 
 
+RP_PREFIX_RE = re.compile(r"rp\.?\s*([\d]+(?:[.,]\d+)*)", re.IGNORECASE)
+
+
 def guess_amount(lines: List[str]) -> float:
     best = None
     for line in lines:
@@ -278,9 +281,28 @@ def guess_amount(lines: List[str]) -> float:
                     best = val  # ambil angka terakhir di baris (biasanya nominalnya)
     if best:
         return best
-    # fallback: angka terbesar di seluruh struk (kemungkinan grand total)
+
+    # Prioritas kedua: angka yang diawali "Rp" (struk transfer/QRIS jarang punya kata "Total",
+    # tapi nominal utama biasanya satu-satunya angka berprefix "Rp" tanpa embel-embel referensi)
+    full_text = "\n".join(lines)
+    rp_matches = []
+    for line in lines:
+        low = line.lower()
+        if any(h in low for h in SKIP_TOTAL_HINTS):
+            continue
+        for m in RP_PREFIX_RE.finditer(line):
+            val = _parse_amount_token(m.group(1))
+            if val and val >= 100:
+                rp_matches.append(val)
+    if rp_matches:
+        return rp_matches[0]  # ambil kemunculan pertama (biasanya nominal utama ditampilkan di awal)
+
+    # fallback terakhir: angka terbesar di seluruh struk (kemungkinan grand total)
     all_vals = []
     for line in lines:
+        low = line.lower()
+        if any(h in low for h in SKIP_TOTAL_HINTS):
+            continue
         for n in re.findall(r"\d[\d.,]*\d|\d", line):
             val = _parse_amount_token(n)
             if val and val >= 100:
