@@ -210,7 +210,8 @@ CATEGORY_KEYWORDS = {
 # Kata yang menandakan baris "grand total" (prioritas tinggi) vs subtotal (prioritas rendah)
 TOTAL_HINTS = ["grand total", "total bayar", "total belanja", "total tagihan", "jumlah bayar", "nominal", "total"]
 SKIP_TOTAL_HINTS = ["subtotal", "sub total", "kembali", "kembalian", "tunai", "cash", "diskon", "discount", "dp ",
-                     "rrn", "approval", "terminal", "reff", "ref no", "no ref", "invoice", "trace", "kode"]
+                     "rrn", "approval", "terminal", "reff", "ref no", "no ref", "invoice", "trace", "kode",
+                     "cn:", "saldo", "e-money balance", "sisa saldo", "balance"]
 MAX_REASONABLE_AMOUNT = 999_999_999  # ceiling wajar untuk satu transaksi (di bawah 1 miliar Rupiah)
 
 MONTHS_ID = {
@@ -265,6 +266,8 @@ def _parse_amount_token(tok: str) -> Optional[float]:
 
 
 RP_PREFIX_RE = re.compile(r"rp\.?\s*([\d]+(?:[.,]\d+)*)", re.IGNORECASE)
+BALANCE_LINE_HINTS = ["cn:", "saldo", "e-money balance", "sisa saldo", "balance"]
+TOLL_LINE_HINTS = ["e-toll", "e toll", "gol-", "gol "]
 
 
 def guess_amount(lines: List[str]) -> float:
@@ -281,6 +284,17 @@ def guess_amount(lines: List[str]) -> float:
                     best = val  # ambil angka terakhir di baris (biasanya nominalnya)
     if best:
         return best
+
+    # Prioritas khusus: struk e-Toll, format umum "Gol-1 e-Toll MANDIRI 21500"
+    # (nomor di baris ini adalah biaya tol, BUKAN saldo kartu yang biasa muncul di baris terpisah)
+    for line in lines:
+        low = line.lower()
+        if any(h in low for h in TOLL_LINE_HINTS):
+            nums = re.findall(r"\d[\d.,]*\d|\d", line)
+            for n in reversed(nums):  # ambil angka terakhir di baris itu
+                val = _parse_amount_token(n)
+                if val and val >= 100:
+                    return val
 
     # Prioritas kedua: angka yang diawali "Rp" (struk transfer/QRIS jarang punya kata "Total",
     # tapi nominal utama biasanya satu-satunya angka berprefix "Rp" tanpa embel-embel referensi)
