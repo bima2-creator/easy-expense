@@ -1,4 +1,3 @@
-# V2
 import os
 import io
 import csv
@@ -209,8 +208,10 @@ CATEGORY_KEYWORDS = {
 }
 
 # Kata yang menandakan baris "grand total" (prioritas tinggi) vs subtotal (prioritas rendah)
-TOTAL_HINTS = ["grand total", "total bayar", "total belanja", "total tagihan", "jumlah bayar", "total"]
-SKIP_TOTAL_HINTS = ["subtotal", "sub total", "kembali", "kembalian", "tunai", "cash", "diskon", "discount", "dp "]
+TOTAL_HINTS = ["grand total", "total bayar", "total belanja", "total tagihan", "jumlah bayar", "nominal", "total"]
+SKIP_TOTAL_HINTS = ["subtotal", "sub total", "kembali", "kembalian", "tunai", "cash", "diskon", "discount", "dp ",
+                     "rrn", "approval", "terminal", "reff", "ref no", "no ref", "invoice", "trace", "kode"]
+MAX_REASONABLE_AMOUNT = 999_999_999  # ceiling wajar untuk satu transaksi (di bawah 1 miliar Rupiah)
 
 MONTHS_ID = {
     "jan": 1, "januari": 1, "feb": 2, "februari": 2, "mar": 3, "maret": 3, "apr": 4, "april": 4,
@@ -241,17 +242,26 @@ def ocr_space_read_text(image_bytes: bytes, content_type: str) -> str:
 
 
 def _parse_amount_token(tok: str) -> Optional[float]:
-    tok = re.sub(r"[^\d.,]", "", tok)
-    if not tok:
+    digits_only = re.sub(r"[^\d]", "", tok)
+    # Nomor referensi/RRN/terminal ID biasanya sangat panjang (10+ digit) -> bukan nominal uang
+    if len(digits_only) > 9:
         return None
-    # Format ID umum: "25.000" atau "25,000" berarti 25000 (titik/koma sbg pemisah ribuan)
-    if re.match(r"^\d{1,3}([.,]\d{3})+$", tok):
-        return float(tok.replace(".", "").replace(",", ""))
-    tok = tok.replace(",", ".")
+    raw = re.sub(r"[^\d.,]", "", tok)
+    if not raw:
+        return None
+    # Buang bagian sen di akhir kalau ada, mis. "798.770,00" atau "798.770.00" -> "798.770"
+    raw = re.sub(r"[.,]\d{2}$", "", raw)
+    # Sisa titik/koma dianggap pemisah ribuan, hapus semua
+    val_str = re.sub(r"[.,]", "", raw)
+    if not val_str:
+        return None
     try:
-        return float(tok)
+        val = float(val_str)
     except ValueError:
         return None
+    if val > MAX_REASONABLE_AMOUNT:
+        return None
+    return val
 
 
 def guess_amount(lines: List[str]) -> float:
@@ -278,7 +288,11 @@ def guess_amount(lines: List[str]) -> float:
     return max(all_vals) if all_vals else 0.0
 
 
-def guess_date(text: str) -> str:
+EXPIRY_KEYWORDS = ["ed:", "ed ", "exp:", "exp ", "expired", "kadaluarsa", "kadaluwarsa", "best before"]
+DATE_KEYWORDS = ["tanggal", "tgl", "date"]
+
+
+def _try_date_patterns(text: str) -> Optional[str]:
     m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -305,7 +319,31 @@ def guess_date(text: str) -> str:
                 return datetime(y, mo, d).date().isoformat()
             except ValueError:
                 pass
-    return datetime.now(timezone.utc).date().isoformat()
+    return None
+
+
+def guess_date(text: str) -> str:
+    today = datetime.now(timezone.utc).date()
+    all_lines = text.splitlines()
+    # Buang baris yang berisi tanggal kadaluarsa produk (bukan tanggal transaksi)
+    clean_lines = [l for l in all_lines if not any(kw in l.lower() for kw in EXPIRY_KEYWORDS)]
+
+    # Prioritas 1: baris yang eksplisit mengandung kata "tanggal/tgl/date"
+    for line in clean_lines:
+        if any(kw in line.lower() for kw in DATE_KEYWORDS):
+            found = _try_date_patterns(line)
+            if found:
+                return found
+
+    # Prioritas 2: cari di seluruh teks yang sudah dibersihkan dari baris kadaluarsa
+    found = _try_date_patterns("\n".join(clean_lines))
+    if found:
+        found_date = datetime.fromisoformat(found).date()
+        # Tolak tanggal yang jauh di masa depan (>30 hari) - kemungkinan salah tangkap
+        if (found_date - today).days <= 30:
+            return found
+
+    return today.isoformat()
 
 
 def guess_vendor(lines: List[str]) -> str:
