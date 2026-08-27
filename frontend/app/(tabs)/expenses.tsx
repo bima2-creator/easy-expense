@@ -6,7 +6,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api";
-import type { Expense } from "@/src/types";
+import type { Expense, Project, WorkOrder } from "@/src/types";
 import { colors, fonts, spacing, radius, type } from "@/src/theme";
 import { formatMoney } from "@/src/lib";
 import { useCategories } from "@/src/categories";
@@ -19,6 +19,8 @@ export default function Expenses() {
   const insets = useSafeAreaInsets();
   const { categories } = useCategories();
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [unpaidWOs, setUnpaidWOs] = useState<WorkOrder[]>([]);
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const [category, setCategory] = useState("Semua");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,17 @@ export default function Expenses() {
     finally { setLoading(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(category, search); }, [category, search, load]));
+  const loadUnpaid = useCallback(async () => {
+    try {
+      const [wos, projects] = await Promise.all([api.workOrders(undefined, false), api.projects()]);
+      setUnpaidWOs(wos);
+      const map: Record<string, string> = {};
+      projects.forEach((p: Project) => { map[p.id] = p.name; });
+      setProjectNames(map);
+    } catch { setUnpaidWOs([]); }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(category, search); loadUnpaid(); }, [category, search, load, loadUnpaid]));
 
   const total = expenses.reduce((s, e) => s + (e.amount || 0), 0);
 
@@ -78,6 +90,24 @@ export default function Expenses() {
           })}
         </ScrollView>
       </View>
+
+      {unpaidWOs.length > 0 && (
+        <View style={styles.unpaidSection}>
+          <View style={styles.unpaidHeader}>
+            <Ionicons name="time-outline" size={15} color={colors.warning} />
+            <Text style={styles.unpaidTitle}>Work Order Belum Dibayar ({unpaidWOs.length})</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.unpaidRow}>
+            {unpaidWOs.map((w) => (
+              <Pressable key={w.id} testID={`unpaid-wo-${w.id}`} onPress={() => router.push(`/workorder/${w.id}`)} style={styles.unpaidCard}>
+                <Text style={styles.unpaidCardName} numberOfLines={1}>{w.name}</Text>
+                <Text style={styles.unpaidCardProject} numberOfLines={1}>{projectNames[w.project_id] || "Proyek"}</Text>
+                <Text style={styles.unpaidCardAmount}>{formatMoney(w.total || 0)}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator color={colors.brand} /></View>
@@ -130,6 +160,14 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   chipText: { fontFamily: fonts.semibold, fontSize: type.base, color: colors.onSurfaceTertiary },
   chipTextActive: { color: colors.onSurfaceInverse },
+  unpaidSection: { paddingTop: spacing.md, paddingBottom: spacing.sm, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  unpaidHeader: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  unpaidTitle: { fontFamily: fonts.semibold, fontSize: type.sm, color: colors.warning },
+  unpaidRow: { gap: spacing.sm, paddingHorizontal: spacing.lg },
+  unpaidCard: { minWidth: 150, backgroundColor: colors.warning + "14", borderWidth: 1, borderColor: colors.warning + "40", borderRadius: radius.md, padding: spacing.md },
+  unpaidCardName: { fontFamily: fonts.semibold, fontSize: type.base, color: colors.onSurface },
+  unpaidCardProject: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
+  unpaidCardAmount: { fontFamily: fonts.display, fontSize: type.lg, color: colors.warning, marginTop: spacing.xs },
   loader: { paddingVertical: spacing.xxxl },
   rowWrap: { marginHorizontal: spacing.lg },
   divider: { height: 1, backgroundColor: colors.divider, marginLeft: 60 },

@@ -140,6 +140,8 @@ class WorkOrder(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     project_id: str
     name: str
+    is_paid: bool = False
+    paid_at: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -149,7 +151,8 @@ class WorkOrderCreate(BaseModel):
 
 
 class WorkOrderUpdate(BaseModel):
-    name: str
+    name: Optional[str] = None
+    is_paid: Optional[bool] = None
 
 
 class Expense(BaseModel):
@@ -530,8 +533,12 @@ async def delete_project(project_id: str):
 # Work Orders
 # ---------------------------------------------------------------------------
 @api_router.get("/work-orders")
-async def list_work_orders(project_id: Optional[str] = Query(None)):
-    q = {"project_id": project_id} if project_id else {}
+async def list_work_orders(project_id: Optional[str] = Query(None), is_paid: Optional[bool] = Query(None)):
+    q = {}
+    if project_id:
+        q["project_id"] = project_id
+    if is_paid is not None:
+        q["is_paid"] = is_paid
     docs = await db.work_orders.find(q).sort("created_at", -1).to_list(1000)
     result = []
     for d in docs:
@@ -569,7 +576,14 @@ async def update_work_order(wo_id: str, body: WorkOrderUpdate):
     doc = await db.work_orders.find_one({"id": wo_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Work order tidak ditemukan")
-    await db.work_orders.update_one({"id": wo_id}, {"$set": {"name": body.name}})
+    update_fields = {}
+    if body.name is not None:
+        update_fields["name"] = body.name
+    if body.is_paid is not None:
+        update_fields["is_paid"] = body.is_paid
+        update_fields["paid_at"] = now_iso() if body.is_paid else None
+    if update_fields:
+        await db.work_orders.update_one({"id": wo_id}, {"$set": update_fields})
     doc = await db.work_orders.find_one({"id": wo_id})
     return WorkOrder(**doc)
 

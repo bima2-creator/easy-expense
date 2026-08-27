@@ -22,6 +22,8 @@ export type WorkOrder = {
   id: string;
   project_id: string;
   name: string;
+  is_paid: boolean;
+  paid_at: string | null;
   created_at: string;
   total?: number;
   expense_count?: number;

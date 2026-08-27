@@ -55,6 +55,20 @@ export default function WorkOrderDetail() {
     } catch { toast("Gagal menghapus", "error"); }
   };
 
+  const togglePaid = async () => {
+    if (!wo) return;
+    const next = !wo.is_paid;
+    setWo({ ...wo, is_paid: next });
+    try {
+      await api.setWorkOrderPaid(id!, next);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast(next ? "Ditandai sudah dibayar" : "Ditandai belum dibayar", "success");
+    } catch {
+      setWo({ ...wo, is_paid: !next });
+      toast("Gagal mengubah status pembayaran", "error");
+    }
+  };
+
   const goAdd = () => router.push(`/add?project_id=${wo?.project_id}&work_order_id=${id}`);
   const goScan = () => router.push(`/scan?project_id=${wo?.project_id}&work_order_id=${id}`);
 
@@ -100,6 +114,18 @@ export default function WorkOrderDetail() {
           <Text style={styles.totalLabel}>TOTAL PENGELUARAN</Text>
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(total)}</Text>
         </View>
+
+        <Pressable testID="wo-toggle-paid" onPress={togglePaid} style={[styles.paidBadge, wo.is_paid ? styles.paidBadgeOn : styles.paidBadgeOff]}>
+          <Ionicons name={wo.is_paid ? "checkmark-circle" : "time-outline"} size={18} color={wo.is_paid ? colors.success : colors.warning} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.paidBadgeTitle, { color: wo.is_paid ? colors.success : colors.warning }]}>
+              {wo.is_paid ? "Sudah Dibayar" : "Belum Dibayar"}
+            </Text>
+            <Text style={styles.paidBadgeSub}>
+              {wo.is_paid ? "Ditandai lunas oleh finance · ketuk untuk batalkan" : "Ketuk untuk tandai sudah dibayar finance"}
+            </Text>
+          </View>
+        </Pressable>
 
         <View style={styles.quickRow}>
           <Pressable testID="wo-scan" onPress={goScan} style={[styles.quickBtn, styles.quickPrimary]}>
@@ -157,6 +183,11 @@ const styles = StyleSheet.create({
   woName: { fontFamily: fonts.bold, fontSize: type["2xl"], color: colors.onSurfaceInverse, marginTop: spacing.sm },
   totalLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 1, color: "#8A8A8D", marginTop: spacing.lg },
   totalAmount: { fontFamily: fonts.display, fontSize: 36, color: colors.onSurfaceInverse, marginTop: spacing.xs },
+  paidBadge: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.md },
+  paidBadgeOn: { borderColor: colors.success + "55", backgroundColor: colors.success + "14" },
+  paidBadgeOff: { borderColor: colors.warning + "55", backgroundColor: colors.warning + "14" },
+  paidBadgeTitle: { fontFamily: fonts.semibold, fontSize: type.base },
+  paidBadgeSub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   quickRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
   quickBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, height: 50, borderRadius: radius.md },
   quickPrimary: { backgroundColor: colors.brand },

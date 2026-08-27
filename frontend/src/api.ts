@@ -41,13 +41,17 @@ export const api = {
   async deleteProject(id: string): Promise<void> { await del(`/projects/${id}`); },
 
   // work orders
-  async workOrders(projectId?: string): Promise<WorkOrder[]> {
-    const q = projectId ? `?project_id=${projectId}` : "";
-    return j(await fetch(`${BASE}/work-orders${q}`));
+  async workOrders(projectId?: string, isPaid?: boolean): Promise<WorkOrder[]> {
+    const q = new URLSearchParams();
+    if (projectId) q.set("project_id", projectId);
+    if (isPaid !== undefined) q.set("is_paid", String(isPaid));
+    const qs = q.toString();
+    return j(await fetch(`${BASE}/work-orders${qs ? `?${qs}` : ""}`));
   },
   async getWorkOrder(id: string): Promise<WorkOrder> { return j(await fetch(`${BASE}/work-orders/${id}`)); },
   async createWorkOrder(project_id: string, name: string): Promise<WorkOrder> { return j(await post("/work-orders", { project_id, name })); },
   async updateWorkOrder(id: string, name: string): Promise<WorkOrder> { return j(await put(`/work-orders/${id}`, { name })); },
+  async setWorkOrderPaid(id: string, is_paid: boolean): Promise<WorkOrder> { return j(await put(`/work-orders/${id}`, { is_paid })); },
   async deleteWorkOrder(id: string): Promise<void> { await del(`/work-orders/${id}`); },
 
   // expenses
