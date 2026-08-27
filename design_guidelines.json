@@ -1,0 +1,174 @@
+{
+  "app_name": "Easy Expense",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A sharp, utilitarian financial tool that feels like a modern ledger—precise, trustworthy, and free of generic SaaS noise.",
+  "color": {
+    "surface": "#F9F9F6",
+    "onSurface": "#1C1C1E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1C1E",
+    "surfaceTertiary": "#F0F0EC",
+    "onSurfaceTertiary": "#4A4A4D",
+    "surfaceInverse": "#1C1C1E",
+    "onSurfaceInverse": "#F9F9F6",
+    "brand": "#1C1C1E",
+    "brandPrimary": "#1C1C1E",
+    "onBrandPrimary": "#F9F9F6",
+    "brandSecondary": "#4A4A4D",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#4A7C59",
+    "onBrandTertiary": "#FFFFFF",
+    "success": "#4A7C59",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D9943B",
+    "onWarning": "#1C1C1E",
+    "error": "#C85A44",
+    "onError": "#FFFFFF",
+    "info": "#4A4A4D",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E5E3",
+    "borderStrong": "#D0D0CE",
+    "divider": "#E5E5E3"
+  },
+  "typography": {
+    "displayFontFamily": "Space Grotesk",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous iOS-native rhythm. Ensure intentional whitespace around content blocks, avoiding cramped edges. Hit targets min 44x44pt.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Bottom tab bar background",
+      "Sticky headers over scrolling content (like expense list)",
+      "Bottom-sheet headers and drag handles",
+      "Floating Action Button (Scan) background base",
+      "Featured cards overlay when sitting on image/gradient backdrop"
+    ],
+    "dont's": [
+      "Form inputs",
+      "Dense list rows",
+      "Basic UI buttons",
+      "Areas requiring high legibility of fine print without a solid tint fallback"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "High-level spending summary and quick access to recent expenses.",
+      "states": {
+        "loading": "Skeleton UI for total balance and bento cards, spinner for list",
+        "empty": "No expenses logged this month. Show illustration of empty desk and a prominent 'Scan your first receipt' CTA.",
+        "error": "Failed to load summary. Text error with retry button."
+      },
+      "layout": "Full-width hero balance card at the top displaying total spend using Space Grotesk. Underneath, a bento grid for quick insights (e.g., top category). Below that, a list of 'Recent Expenses' using inset tonal panels (surfaceSecondary on surface) and a ledger spine (hairline vertical line connecting items)."
+    },
+    {
+      "name": "Scan Flow",
+      "purpose": "Capture and auto-extract receipt data accurately.",
+      "states": {
+        "loading": "AI extraction spinner overlaid on captured image",
+        "empty": "N/A - camera view",
+        "error": "Could not detect details. Manual entry form shown."
+      },
+      "layout": "Full-screen camera viewfinder taking primary screen area. Translucent, safe-area aligned top/bottom controls. Centered reticle/bracket overlay. Once captured, shifts to a bottom-sheet driven review screen: top half shows the cropped receipt image, bottom sheet contains auto-filled form (surfaceTertiary) fields for manual edit."
+    },
+    {
+      "name": "Expenses List",
+      "purpose": "Browse, filter, and search all historical expenses.",
+      "states": {
+        "loading": "Skeleton rows spanning full width",
+        "empty": "Illustration indicating no matches found with the current filters. Clear filters button.",
+        "error": "Network fail, retry button"
+      },
+      "layout": "Sticky glass header with horizontal scrollable filter chips (Categories/Projects). Tonal list rows (roughly 72dp high) with right-aligned tabular amounts in JetBrains Mono or Space Grotesk. Hairline dividers (0.5pt) separating rows."
+    },
+    {
+      "name": "Expense Detail",
+      "purpose": "View full receipt and edit categorized data.",
+      "states": {
+        "loading": "Spinner centered on screen",
+        "empty": "Receipt image missing/deleted. Fallback placeholder.",
+        "error": "Failed to save changes. Inline error text."
+      },
+      "layout": "Receipt image hero (top 40% of screen) with a top-to-bottom gradient scrim (transparent to ≥70% surfaceInverse) to protect header icons. Bottom 60% is a scrollable form in surfaceSecondary with 1px borders for input fields. Sticky primary 'Save Changes' CTA at the bottom in a safe-area respecting fixed container."
+    },
+    {
+      "name": "Reports Analytics",
+      "purpose": "Visualize spending habits and export for tax purposes.",
+      "states": {
+        "loading": "Chart skeletons",
+        "empty": "Not enough data to generate reports.",
+        "error": "Data fetch error."
+      },
+      "layout": "Segmented controls (Weekly/Monthly/Quarterly) pinned under a glass header. Minimalist bar charts (using brandTertiary moss green). A prominent 'Export CSV' button anchored at the bottom using a fixed container with top fade-shadow."
+    }
+  ],
+  "images": {
+    "reports_background": {
+      "url": "https://images.unsplash.com/photo-1745270917449-c2e2c5806586?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMG1pbmltYWxpc3QlMjBmaW5hbmNpYWwlMjBjaGFydCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NzU4MzExfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "abstract minimalist financial chart background"
+    },
+    "empty_state_desk": {
+      "url": "https://images.unsplash.com/photo-1585435465945-bef5a93f8849?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMG1pbmltYWxpc3QlMjBkZXNrJTIwcGxhbm5lciUyMHRvcCUyMHZpZXd8ZW58MHx8fHwxNzg3NzU4MzExfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "empty minimalist desk planner top view"
+    },
+    "receipt_detail_hero": {
+      "url": "https://images.unsplash.com/photo-1604147706283-d7119b5b822c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwxfHxyZWNlaXB0JTIwcGFwZXIlMjB0ZXh0dXJlJTIwY2xvc2UlMjB1cHxlbnwwfHx8fDE3ODc3NTgzMTF8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "receipt paper texture close up"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette: No blues, purples, or generic AI-tech colors anywhere. Utilize the defined Moss Green, Terracotta, and Bone White palette to establish a trustworthy, utilitarian finance tool.",
+    "Typography constraints: Use Space Grotesk strictly for all tabular data, amounts, and prominent metrics (balances). Use Plus Jakarta Sans for UI labels, body, and standard text.",
+    "Implement 'Inset Tonal Panels': Use hairline dividers (0.5pt) and tonal background separation instead of heavy drop shadows to structure the layout.",
+    "Ensure all numbers align to a strict baseline rhythm, and use JetBrains Mono or Space Grotesk tabular figures for lists to maintain vertical digit alignment.",
+    "The primary Scan action should be an elevated FAB positioned centrally in the bottom navigation bar.",
+    "Implement the gradient scrim (transparent to >=70% surfaceInverse) pattern anywhere text overlays an image, especially on the Expense Detail receipt hero.",
+    "For the Scan Flow, ensure the manual entry fallback is immediately accessible without interrupting the primary camera flow. Use a bottom sheet to slide up the extraction results."
+  ],
+  "haptics": {
+    "primary_button_press": "impactLight",
+    "scan_capture": "impactMedium",
+    "tab_switch": "selection",
+    "ai_extraction_success": "notificationSuccess",
+    "ai_extraction_error": "notificationError",
+    "filter_chip_toggle": "impactLight"
+  }
+}

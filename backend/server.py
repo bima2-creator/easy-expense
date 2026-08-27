@@ -1,0 +1,907 @@
+import os
+import io
+import csv
+import re
+import uuid
+import json
+import base64
+import logging
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import List, Optional
+
+import requests
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+APP_NAME = "easy-expense"
+
+# Local disk storage for receipt images (replaces Emergent Object Storage)
+UPLOAD_DIR = ROOT_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+api_router = APIRouter(prefix="/api")
+
+DEFAULT_CATEGORIES = [
+    {"name": "Makan", "icon": "restaurant-outline", "color": "#C85A44"},
+    {"name": "Minum", "icon": "cafe-outline", "color": "#4A7C7C"},
+    {"name": "Entertain", "icon": "film-outline", "color": "#B5573F"},
+    {"name": "Fuel", "icon": "car-sport-outline", "color": "#8F6B5B"},
+    {"name": "Toll", "icon": "trail-sign-outline", "color": "#5B8F6B"},
+    {"name": "Office Supplies", "icon": "briefcase-outline", "color": "#5B6C8F"},
+]
+CUSTOM_COLORS = ["#4A7C59", "#D9943B", "#7A5B8F", "#5B6C8F", "#8F7A5B", "#4A7C7C", "#B5573F"]
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def rupiah(amount) -> str:
+    try:
+        return "Rp " + f"{int(round(float(amount or 0))):,}".replace(",", ".")
+    except Exception:
+        return "Rp 0"
+
+
+# ---------------------------------------------------------------------------
+# Object Storage (local disk)
+# ---------------------------------------------------------------------------
+def _safe_local_path(path: str) -> Path:
+    # path looks like "easy-expense/uploads/default/<uuid>.jpg"
+    full = (UPLOAD_DIR / path).resolve()
+    if not str(full).startswith(str(UPLOAD_DIR.resolve())):
+        raise ValueError("Invalid path")
+    return full
+
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    full = _safe_local_path(path)
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(data)
+    return {"path": path}
+
+
+def get_object(path: str):
+    full = _safe_local_path(path)
+    if not full.exists():
+        raise FileNotFoundError(path)
+    ext = full.suffix.lower().lstrip(".")
+    ctype = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "application/octet-stream")
+    return full.read_bytes(), ctype
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+class Category(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    icon: str = "pricetag-outline"
+    color: str = "#4A7C59"
+    is_default: bool = False
+    created_at: str = Field(default_factory=now_iso)
+
+
+class CategoryCreate(BaseModel):
+    name: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str
+
+
+class Project(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    client: Optional[str] = ""
+    color: Optional[str] = "#4A7C59"
+    created_at: str = Field(default_factory=now_iso)
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    client: Optional[str] = ""
+    color: Optional[str] = "#4A7C59"
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    client: Optional[str] = None
+    color: Optional[str] = None
+
+
+class WorkOrder(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project_id: str
+    name: str
+    created_at: str = Field(default_factory=now_iso)
+
+
+class WorkOrderCreate(BaseModel):
+    project_id: str
+    name: str
+
+
+class WorkOrderUpdate(BaseModel):
+    name: str
+
+
+class Expense(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    vendor: str = "Vendor Tidak Diketahui"
+    amount: float = 0.0
+    date: str = Field(default_factory=lambda: datetime.now(timezone.utc).date().isoformat())
+    category: str = "Makan"
+    project_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    notes: Optional[str] = ""
+    receipt_path: Optional[str] = None
+    is_billable: bool = False
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class ExpenseCreate(BaseModel):
+    vendor: str = "Vendor Tidak Diketahui"
+    amount: float = 0.0
+    date: Optional[str] = None
+    category: str = "Makan"
+    project_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    notes: Optional[str] = ""
+    receipt_path: Optional[str] = None
+    is_billable: bool = False
+
+
+class ExpenseUpdate(BaseModel):
+    vendor: Optional[str] = None
+    amount: Optional[float] = None
+    date: Optional[str] = None
+    category: Optional[str] = None
+    project_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    notes: Optional[str] = None
+    is_billable: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# Receipt extraction: OCR.space (free tier, no local ML needed) + heuristic parsing
+# ---------------------------------------------------------------------------
+OCR_SPACE_API_KEY = os.environ.get('OCR_SPACE_API_KEY')
+OCR_SPACE_URL = "https://apipro1.ocr.space/parse/image"
+
+# Kata kunci per kategori untuk menebak kategori dari isi struk (Bahasa Indonesia + umum)
+CATEGORY_KEYWORDS = {
+    "Makan": ["restoran", "resto", "warung", "rumah makan", "cafe", "kafe", "nasi", "ayam",
+              "bakso", "mie", "soto", "padang", "kfc", "mcdonald", "mcd", "pizza", "burger"],
+    "Minum": ["kopi", "coffee", "starbucks", "juice", "jus", "boba", "teh", "minuman", "cafe"],
+    "Entertain": ["cinema", "bioskop", "xxi", "cgv", "karaoke", "game", "billiard", "tiket"],
+    "Fuel": ["pertamina", "shell", "bensin", "pertalite", "pertamax", "solar", "spbu", "bbm"],
+    "Toll": ["tol", "toll", "e-toll", "gerbang"],
+    "Office Supplies": ["atk", "stationery", "kertas", "printer", "tinta", "gramedia", "toko buku"],
+}
+
+# Kata yang menandakan baris "grand total" (prioritas tinggi) vs subtotal (prioritas rendah)
+TOTAL_HINTS = ["grand total", "total bayar", "total belanja", "total tagihan", "jumlah bayar", "total"]
+SKIP_TOTAL_HINTS = ["subtotal", "sub total", "kembali", "kembalian", "tunai", "cash", "diskon", "discount", "dp "]
+
+MONTHS_ID = {
+    "jan": 1, "januari": 1, "feb": 2, "februari": 2, "mar": 3, "maret": 3, "apr": 4, "april": 4,
+    "mei": 5, "may": 5, "jun": 6, "juni": 6, "jul": 7, "juli": 7, "agu": 8, "agt": 8, "agustus": 8, "aug": 8,
+    "sep": 9, "september": 9, "okt": 10, "oktober": 10, "oct": 10, "nov": 11, "november": 11,
+    "des": 12, "desember": 12, "dec": 12,
+}
+
+
+def ocr_space_read_text(image_bytes: bytes, content_type: str) -> str:
+    if not OCR_SPACE_API_KEY:
+        raise RuntimeError("OCR_SPACE_API_KEY belum diset di backend/.env")
+    ext = "jpg"
+    if "png" in content_type:
+        ext = "png"
+    resp = requests.post(
+        OCR_SPACE_URL,
+        files={"file": (f"receipt.{ext}", image_bytes, content_type)},
+        data={"apikey": OCR_SPACE_API_KEY, "language": "eng", "OCREngine": "2", "scale": "true"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    if result.get("IsErroredOnProcessing"):
+        raise RuntimeError(str(result.get("ErrorMessage") or "OCR gagal memproses gambar"))
+    parsed = result.get("ParsedResults") or []
+    return parsed[0].get("ParsedText", "") if parsed else ""
+
+
+def _parse_amount_token(tok: str) -> Optional[float]:
+    tok = re.sub(r"[^\d.,]", "", tok)
+    if not tok:
+        return None
+    # Format ID umum: "25.000" atau "25,000" berarti 25000 (titik/koma sbg pemisah ribuan)
+    if re.match(r"^\d{1,3}([.,]\d{3})+$", tok):
+        return float(tok.replace(".", "").replace(",", ""))
+    tok = tok.replace(",", ".")
+    try:
+        return float(tok)
+    except ValueError:
+        return None
+
+
+def guess_amount(lines: List[str]) -> float:
+    best = None
+    for line in lines:
+        low = line.lower()
+        if any(h in low for h in SKIP_TOTAL_HINTS):
+            continue
+        if any(h in low for h in TOTAL_HINTS):
+            nums = re.findall(r"\d[\d.,]*\d|\d", line)
+            for n in nums:
+                val = _parse_amount_token(n)
+                if val and val > 0:
+                    best = val  # ambil angka terakhir di baris (biasanya nominalnya)
+    if best:
+        return best
+    # fallback: angka terbesar di seluruh struk (kemungkinan grand total)
+    all_vals = []
+    for line in lines:
+        for n in re.findall(r"\d[\d.,]*\d|\d", line):
+            val = _parse_amount_token(n)
+            if val and val >= 100:
+                all_vals.append(val)
+    return max(all_vals) if all_vals else 0.0
+
+
+def guess_date(text: str) -> str:
+    m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return datetime(y, mo, d).date().isoformat()
+        except ValueError:
+            pass
+    m = re.search(r"(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})", text)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y < 100:
+            y += 2000
+        try:
+            return datetime(y, mo, d).date().isoformat()
+        except ValueError:
+            pass
+    m = re.search(r"(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})", text, re.IGNORECASE)
+    if m:
+        d = int(m.group(1))
+        mo = MONTHS_ID.get(m.group(2).lower())
+        y = int(m.group(3))
+        if mo:
+            try:
+                return datetime(y, mo, d).date().isoformat()
+            except ValueError:
+                pass
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def guess_vendor(lines: List[str]) -> str:
+    for line in lines[:6]:
+        clean = line.strip()
+        letters = sum(ch.isalpha() for ch in clean)
+        digits = sum(ch.isdigit() for ch in clean)
+        if letters >= 3 and letters > digits and len(clean) <= 40:
+            return clean.title() if clean.isupper() else clean
+    return "Vendor Tidak Diketahui"
+
+
+def guess_category(text: str, category_names: List[str]) -> str:
+    low = text.lower()
+    for cat_name in category_names:
+        for kw in CATEGORY_KEYWORDS.get(cat_name, []):
+            if kw in low:
+                return cat_name
+    return category_names[0] if category_names else "Makan"
+
+
+async def extract_receipt(image_bytes: bytes, content_type: str, category_names: List[str]) -> dict:
+    raw_text = await run_in_threadpool(ocr_space_read_text, image_bytes, content_type)
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+
+    return {
+        "vendor": guess_vendor(lines),
+        "amount": guess_amount(lines),
+        "date": guess_date(raw_text),
+        "category": guess_category(raw_text, category_names),
+        "notes": "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Categories
+# ---------------------------------------------------------------------------
+async def ensure_default_categories():
+    count = await db.categories.count_documents({})
+    if count == 0:
+        for c in DEFAULT_CATEGORIES:
+            cat = Category(name=c["name"], icon=c["icon"], color=c["color"], is_default=True)
+            await db.categories.insert_one(cat.dict())
+
+
+@api_router.get("/categories", response_model=List[Category])
+async def list_categories():
+    docs = await db.categories.find().sort("created_at", 1).to_list(1000)
+    return [Category(**d) for d in docs]
+
+
+@api_router.post("/categories", response_model=Category)
+async def create_category(body: CategoryCreate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nama kategori wajib diisi")
+    existing = await db.categories.find_one({"name": name})
+    if existing:
+        raise HTTPException(status_code=400, detail="Kategori sudah ada")
+    n = await db.categories.count_documents({})
+    cat = Category(name=name, color=CUSTOM_COLORS[n % len(CUSTOM_COLORS)])
+    await db.categories.insert_one(cat.dict())
+    return cat
+
+
+@api_router.put("/categories/{category_id}", response_model=Category)
+async def update_category(category_id: str, body: CategoryUpdate):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+    new_name = body.name.strip()
+    old_name = doc["name"]
+    await db.categories.update_one({"id": category_id}, {"$set": {"name": new_name}})
+    # propagate rename to expenses
+    await db.expenses.update_many({"category": old_name}, {"$set": {"category": new_name}})
+    doc = await db.categories.find_one({"id": category_id})
+    return Category(**doc)
+
+
+@api_router.delete("/categories/{category_id}")
+async def delete_category(category_id: str):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+    await db.categories.delete_one({"id": category_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Projects
+# ---------------------------------------------------------------------------
+@api_router.get("/projects")
+async def list_projects():
+    docs = await db.projects.find().sort("created_at", -1).to_list(1000)
+    result = []
+    for d in docs:
+        p = Project(**d).dict()
+        wo_count = await db.work_orders.count_documents({"project_id": p["id"]})
+        agg = await db.expenses.aggregate([
+            {"$match": {"project_id": p["id"]}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        ]).to_list(1)
+        p["work_order_count"] = wo_count
+        p["total"] = round(agg[0]["total"], 2) if agg else 0
+        p["expense_count"] = agg[0]["count"] if agg else 0
+        result.append(p)
+    return result
+
+
+@api_router.get("/projects/{project_id}")
+async def get_project(project_id: str):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+    return Project(**doc)
+
+
+@api_router.post("/projects", response_model=Project)
+async def create_project(body: ProjectCreate):
+    proj = Project(**body.dict())
+    await db.projects.insert_one(proj.dict())
+    return proj
+
+
+@api_router.put("/projects/{project_id}", response_model=Project)
+async def update_project(project_id: str, body: ProjectUpdate):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    await db.projects.update_one({"id": project_id}, {"$set": updates})
+    doc = await db.projects.find_one({"id": project_id})
+    return Project(**doc)
+
+
+@api_router.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    res = await db.projects.delete_one({"id": project_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+    # detach work orders and expenses
+    await db.work_orders.delete_many({"project_id": project_id})
+    await db.expenses.update_many({"project_id": project_id}, {"$set": {"project_id": None, "work_order_id": None}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Work Orders
+# ---------------------------------------------------------------------------
+@api_router.get("/work-orders")
+async def list_work_orders(project_id: Optional[str] = Query(None)):
+    q = {"project_id": project_id} if project_id else {}
+    docs = await db.work_orders.find(q).sort("created_at", -1).to_list(1000)
+    result = []
+    for d in docs:
+        wo = WorkOrder(**d).dict()
+        agg = await db.expenses.aggregate([
+            {"$match": {"work_order_id": wo["id"]}},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        ]).to_list(1)
+        wo["total"] = round(agg[0]["total"], 2) if agg else 0
+        wo["expense_count"] = agg[0]["count"] if agg else 0
+        result.append(wo)
+    return result
+
+
+@api_router.get("/work-orders/{wo_id}")
+async def get_work_order(wo_id: str):
+    doc = await db.work_orders.find_one({"id": wo_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Work order tidak ditemukan")
+    return WorkOrder(**doc)
+
+
+@api_router.post("/work-orders", response_model=WorkOrder)
+async def create_work_order(body: WorkOrderCreate):
+    proj = await db.projects.find_one({"id": body.project_id})
+    if not proj:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+    wo = WorkOrder(**body.dict())
+    await db.work_orders.insert_one(wo.dict())
+    return wo
+
+
+@api_router.put("/work-orders/{wo_id}", response_model=WorkOrder)
+async def update_work_order(wo_id: str, body: WorkOrderUpdate):
+    doc = await db.work_orders.find_one({"id": wo_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Work order tidak ditemukan")
+    await db.work_orders.update_one({"id": wo_id}, {"$set": {"name": body.name}})
+    doc = await db.work_orders.find_one({"id": wo_id})
+    return WorkOrder(**doc)
+
+
+@api_router.delete("/work-orders/{wo_id}")
+async def delete_work_order(wo_id: str):
+    res = await db.work_orders.delete_one({"id": wo_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Work order tidak ditemukan")
+    await db.expenses.update_many({"work_order_id": wo_id}, {"$set": {"work_order_id": None}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Scan & Files
+# ---------------------------------------------------------------------------
+@api_router.post("/scan")
+async def scan_receipt(file: UploadFile = File(...)):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File kosong")
+
+    ext = "jpg"
+    ctype = file.content_type or "image/jpeg"
+    if "png" in ctype:
+        ext = "png"
+    elif "webp" in ctype:
+        ext = "webp"
+
+    path = f"{APP_NAME}/uploads/default/{uuid.uuid4()}.{ext}"
+    try:
+        await run_in_threadpool(put_object, path, raw, ctype)
+    except Exception as e:
+        logger.error(f"Storage upload failed: {e}")
+        raise HTTPException(status_code=502, detail="Gagal menyimpan struk")
+
+    cat_docs = await db.categories.find().sort("created_at", 1).to_list(1000)
+    category_names = [c["name"] for c in cat_docs] or [c["name"] for c in DEFAULT_CATEGORIES]
+
+    try:
+        extracted = await extract_receipt(raw, ctype, category_names)
+    except Exception as e:
+        logger.error(f"OCR extraction failed: {e}")
+        extracted = {
+            "vendor": "Vendor Tidak Diketahui", "amount": 0,
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "category": category_names[0], "notes": "",
+        }
+        return {"receipt_path": path, "extracted": extracted, "extraction_failed": True}
+
+    return {"receipt_path": path, "extracted": extracted, "extraction_failed": False}
+
+
+@api_router.get("/files/{path:path}")
+async def get_file(path: str):
+    try:
+        content, ctype = await run_in_threadpool(get_object, path)
+    except Exception as e:
+        logger.error(f"Storage read failed: {e}")
+        raise HTTPException(status_code=404, detail="File tidak ditemukan")
+    return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------------------------------------------------------------------------
+# Expenses
+# ---------------------------------------------------------------------------
+@api_router.post("/expenses", response_model=Expense)
+async def create_expense(body: ExpenseCreate):
+    data = body.dict()
+    if not data.get("date"):
+        data.pop("date", None)
+    exp = Expense(**{k: v for k, v in data.items() if v is not None or k in ("project_id", "work_order_id")})
+    await db.expenses.insert_one(exp.dict())
+    return exp
+
+
+@api_router.get("/expenses", response_model=List[Expense])
+async def list_expenses(
+    category: Optional[str] = Query(None),
+    project_id: Optional[str] = Query(None),
+    work_order_id: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+):
+    q = {}
+    if category and category != "Semua":
+        q["category"] = category
+    if project_id:
+        q["project_id"] = project_id
+    if work_order_id:
+        q["work_order_id"] = work_order_id
+    if search:
+        q["vendor"] = {"$regex": search, "$options": "i"}
+    docs = await db.expenses.find(q).sort("date", -1).to_list(2000)
+    return [Expense(**d) for d in docs]
+
+
+@api_router.get("/expenses/{expense_id}", response_model=Expense)
+async def get_expense(expense_id: str):
+    doc = await db.expenses.find_one({"id": expense_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
+    return Expense(**doc)
+
+
+@api_router.put("/expenses/{expense_id}", response_model=Expense)
+async def update_expense(expense_id: str, body: ExpenseUpdate):
+    doc = await db.expenses.find_one({"id": expense_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
+    updates = {k: v for k, v in body.dict(exclude_unset=True).items()}
+    updates["updated_at"] = now_iso()
+    await db.expenses.update_one({"id": expense_id}, {"$set": updates})
+    doc = await db.expenses.find_one({"id": expense_id})
+    return Expense(**doc)
+
+
+@api_router.delete("/expenses/{expense_id}")
+async def delete_expense(expense_id: str):
+    res = await db.expenses.delete_one({"id": expense_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+@api_router.get("/reports/summary")
+async def reports_summary(period: str = Query("month")):
+    docs = await db.expenses.find().to_list(5000)
+    now = datetime.now(timezone.utc)
+
+    def in_period(d):
+        try:
+            dt = datetime.fromisoformat(d["date"])
+        except Exception:
+            return True
+        if period == "week":
+            return (now.date() - dt.date()).days <= 7
+        if period == "month":
+            return dt.year == now.year and dt.month == now.month
+        if period == "quarter":
+            return dt.year == now.year and ((dt.month - 1) // 3) == ((now.month - 1) // 3)
+        if period == "year":
+            return dt.year == now.year
+        return True
+
+    filtered = [d for d in docs if in_period(d)]
+    total = sum(float(d.get("amount") or 0) for d in filtered)
+
+    by_cat = {}
+    for d in filtered:
+        c = d.get("category", "Lainnya")
+        by_cat[c] = by_cat.get(c, 0) + float(d.get("amount") or 0)
+    by_category = sorted(
+        [{"category": k, "amount": round(v, 2)} for k, v in by_cat.items()],
+        key=lambda x: x["amount"], reverse=True,
+    )
+
+    projects = {p["id"]: p["name"] for p in await db.projects.find().to_list(1000)}
+    by_proj = {}
+    for d in filtered:
+        pid = d.get("project_id")
+        if pid:
+            by_proj[pid] = by_proj.get(pid, 0) + float(d.get("amount") or 0)
+    by_project = sorted(
+        [{"name": projects.get(k, "Proyek"), "amount": round(v, 2)} for k, v in by_proj.items()],
+        key=lambda x: x["amount"], reverse=True,
+    )
+
+    trend = []
+    for i in range(5, -1, -1):
+        m = (now.month - i - 1) % 12 + 1
+        y = now.year + ((now.month - i - 1) // 12)
+        msum = 0.0
+        for d in docs:
+            try:
+                dt = datetime.fromisoformat(d["date"])
+                if dt.year == y and dt.month == m:
+                    msum += float(d.get("amount") or 0)
+            except Exception:
+                continue
+        trend.append({"label": datetime(y, m, 1).strftime("%b"), "amount": round(msum, 2)})
+
+    return {
+        "period": period,
+        "total": round(total, 2),
+        "count": len(filtered),
+        "by_category": by_category,
+        "by_project": by_project,
+        "trend": trend,
+    }
+
+
+@api_router.get("/reports/export")
+async def export_csv():
+    docs = await db.expenses.find().sort("date", -1).to_list(5000)
+    projects = {p["id"]: p["name"] for p in await db.projects.find().to_list(1000)}
+    work_orders = {w["id"]: w["name"] for w in await db.work_orders.find().to_list(2000)}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Tanggal", "Vendor", "Kategori", "Proyek", "Work Order", "Jumlah (Rp)", "Billable", "Catatan"])
+    for d in docs:
+        writer.writerow([
+            d.get("date", ""), d.get("vendor", ""), d.get("category", ""),
+            projects.get(d.get("project_id"), ""), work_orders.get(d.get("work_order_id"), ""),
+            int(round(float(d.get("amount") or 0))),
+            "Ya" if d.get("is_billable") else "Tidak", d.get("notes", ""),
+        ])
+    output.seek(0)
+    filename = f"pengeluaran_{datetime.now(timezone.utc).date().isoformat()}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _rl_image(raw: bytes, max_w_mm=80, max_h_mm=95):
+    from reportlab.platypus import Image as RLImage
+    from PIL import Image as PILImage
+    im = PILImage.open(io.BytesIO(raw))
+    if im.mode not in ("RGB", "L"):
+        im = im.convert("RGB")
+    im.thumbnail((1400, 1400))
+    bio = io.BytesIO()
+    im.save(bio, format="JPEG", quality=72)
+    bio.seek(0)
+    w, h = im.size
+    ratio = min((max_w_mm * mm) / w, (max_h_mm * mm) / h)
+    return RLImage(bio, width=w * ratio, height=h * ratio)
+
+
+async def _gather_receipts(expenses):
+    out = {}
+    for e in expenses:
+        p = e.get("receipt_path")
+        if not p:
+            continue
+        try:
+            content, _ = await run_in_threadpool(get_object, p)
+            out[e["id"]] = content
+        except Exception as ex:
+            logger.error(f"receipt fetch failed {p}: {ex}")
+    return out
+
+
+def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label="TOTAL"):
+    from reportlab.platypus import Image as RLImage, KeepTogether
+    styles = getSampleStyleSheet()
+    ink = rl_colors.HexColor("#1C1C1E")
+    moss = rl_colors.HexColor("#4A7C59")
+    muted = rl_colors.HexColor("#8A8A8D")
+    line = rl_colors.HexColor("#E5E5E3")
+
+    h1 = ParagraphStyle("h1", parent=styles["Title"], textColor=ink, fontSize=22, spaceAfter=2)
+    sub = ParagraphStyle("sub", parent=styles["Normal"], textColor=muted, fontSize=10)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=ink, fontSize=13, spaceBefore=10, spaceAfter=4)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, textColor=ink)
+    cap = ParagraphStyle("cap", parent=styles["Normal"], fontSize=9, textColor=ink, spaceAfter=4)
+
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=18 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm)
+    elements = [Paragraph(title, h1)]
+    for s in subtitle_lines:
+        elements.append(Paragraph(s, sub))
+    elements.append(Spacer(1, 8 * mm))
+
+    def exp_table(exps):
+        data = [["Tanggal", "Vendor", "Kategori", "Jumlah"]]
+        subtotal = 0.0
+        for e in exps:
+            subtotal += float(e.get("amount") or 0)
+            data.append([e.get("date", ""), Paragraph(e.get("vendor", ""), cell),
+                         e.get("category", ""), rupiah(e.get("amount"))])
+        t = Table(data, colWidths=[24 * mm, 70 * mm, 40 * mm, 34 * mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ink), ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 9), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (3, 0), (3, -1), "RIGHT"), ("LINEBELOW", (0, 1), (-1, -1), 0.4, line),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return t, subtotal
+
+    grand = 0.0
+    attach_exps = []
+    for g in groups:
+        elements.append(Paragraph(g["name"], h2))
+        if g["expenses"]:
+            t, st = exp_table(g["expenses"])
+            elements.append(t)
+            elements.append(Paragraph(f"<para align='right'><b>Subtotal: {rupiah(st)}</b></para>", cell))
+            grand += st
+            attach_exps.extend(g["expenses"])
+        else:
+            elements.append(Paragraph("Belum ada pengeluaran.", sub))
+        elements.append(Spacer(1, 4 * mm))
+
+    elements.append(Spacer(1, 6 * mm))
+    total_tbl = Table([[total_label, rupiah(grand)]], colWidths=[134 * mm, 34 * mm])
+    total_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), moss), ("TEXTCOLOR", (0, 0), (-1, -1), rl_colors.white),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 12),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8), ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(total_tbl)
+
+    attach = [e for e in attach_exps if receipts.get(e["id"])]
+    if attach:
+        elements.append(Spacer(1, 8 * mm))
+        elements.append(Paragraph(f"Lampiran Bukti Struk ({len(attach)})", h2))
+        for e in attach:
+            try:
+                img = _rl_image(receipts[e["id"]])
+                caption = Paragraph(
+                    f"{e.get('vendor','')} — {e.get('date','')} — <b>{rupiah(e.get('amount'))}</b>", cap)
+                elements.append(KeepTogether([caption, img, Spacer(1, 6 * mm)]))
+            except Exception as ex:
+                logger.error(f"embed receipt failed: {ex}")
+
+    doc.build(elements)
+
+
+@api_router.get("/projects/{project_id}/pdf")
+async def project_pdf(project_id: str):
+    proj = await db.projects.find_one({"id": project_id})
+    if not proj:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+
+    work_orders = await db.work_orders.find({"project_id": project_id}).sort("created_at", 1).to_list(2000)
+    all_exp = await db.expenses.find({"project_id": project_id}).sort("date", 1).to_list(5000)
+
+    groups = []
+    for w in work_orders:
+        groups.append({"name": f"Work Order: {w['name']}",
+                       "expenses": [e for e in all_exp if e.get("work_order_id") == w["id"]]})
+    unassigned = [e for e in all_exp if not e.get("work_order_id")]
+    if unassigned:
+        groups.append({"name": "Tanpa Work Order", "expenses": unassigned})
+
+    receipts = await _gather_receipts(all_exp)
+    subtitle = [f"Proyek: <b>{proj['name']}</b>"]
+    if proj.get("client"):
+        subtitle.append(f"Klien: {proj['client']}")
+    subtitle.append(f"Dibuat: {datetime.now(timezone.utc).strftime('%d %b %Y')}")
+
+    buf = io.BytesIO()
+    _build_expense_pdf(buf, "LAPORAN PENGELUARAN", subtitle, groups, receipts, "TOTAL PROYEK")
+    buf.seek(0)
+    safe = "".join(ch for ch in proj["name"] if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf",
+                             headers={"Content-Disposition": f"attachment; filename=laporan_{safe or 'proyek'}.pdf"})
+
+
+@api_router.get("/work-orders/{wo_id}/pdf")
+async def work_order_pdf(wo_id: str):
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order tidak ditemukan")
+    proj = await db.projects.find_one({"id": wo.get("project_id")})
+    exps = await db.expenses.find({"work_order_id": wo_id}).sort("date", 1).to_list(5000)
+
+    groups = [{"name": f"Work Order: {wo['name']}", "expenses": exps}]
+    receipts = await _gather_receipts(exps)
+    subtitle = []
+    if proj:
+        subtitle.append(f"Proyek: <b>{proj['name']}</b>")
+    subtitle.append(f"Work Order: {wo['name']}")
+    subtitle.append(f"Dibuat: {datetime.now(timezone.utc).strftime('%d %b %Y')}")
+
+    buf = io.BytesIO()
+    _build_expense_pdf(buf, "LAPORAN WORK ORDER", subtitle, groups, receipts, "TOTAL PENGELUARAN")
+    buf.seek(0)
+    safe = "".join(ch for ch in wo["name"] if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf",
+                             headers={"Content-Disposition": f"attachment; filename=laporan_wo_{safe or 'wo'}.pdf"})
+
+
+@api_router.get("/")
+async def root():
+    return {"message": "Easy Expense API", "status": "ok"}
+
+
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+async def startup():
+    try:
+        await ensure_default_categories()
+        logger.info("Default categories ensured")
+    except Exception as e:
+        logger.error(f"Category seed failed: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
