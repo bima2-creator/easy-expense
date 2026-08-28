@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Switch, StyleSheet } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, Switch, StyleSheet, Platform } from "react-native";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, fonts, spacing, radius, type } from "@/src/theme";
-import { formatMoney } from "@/src/lib";
+import { formatMoney, formatDate } from "@/src/lib";
 import { api } from "@/src/api";
 import type { Project, WorkOrder } from "@/src/types";
 import { useCategories } from "@/src/categories";
@@ -39,6 +40,19 @@ export default function ExpenseForm({
   const [projects, setProjects] = useState<Project[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [modal, setModal] = useState<null | "project" | "workorder">(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const parsedDate = (() => {
+    const d = new Date(`${value.date}T00:00:00`);
+    return isNaN(d.getTime()) ? new Date() : d;
+  })();
+
+  const onDateChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === "android") setShowDatePicker(false);
+    if (event.type === "dismissed" || !selected) return;
+    const iso = `${selected.getFullYear()}-${String(selected.getMonth() + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`;
+    onChange({ date: iso });
+  };
 
   const loadProjects = async () => { try { setProjects(await api.projects()); } catch {} };
   useEffect(() => { loadProjects(); }, []);
@@ -96,14 +110,19 @@ export default function ExpenseForm({
       </Field>
 
       <Field label="TANGGAL">
-        <TextInput
-          testID="form-date-input"
-          value={value.date}
-          onChangeText={(t) => onChange({ date: t })}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={colors.muted}
-          style={styles.input}
-        />
+        <Pressable testID="form-date-input" onPress={() => setShowDatePicker(true)} style={[styles.input, styles.dateInput]}>
+          <Text style={styles.dateText}>{formatDate(value.date)}</Text>
+          <Ionicons name="calendar-outline" size={20} color={colors.muted} />
+        </Pressable>
+        {showDatePicker && (
+          <DateTimePicker
+            value={parsedDate}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "calendar"}
+            maximumDate={new Date()}
+            onChange={onDateChange}
+          />
+        )}
       </Field>
 
       <Field label="PROYEK">
@@ -242,6 +261,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     fontFamily: fonts.medium, fontSize: type.lg, color: colors.onSurface,
   },
+  dateInput: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  dateText: { fontFamily: fonts.medium, fontSize: type.lg, color: colors.onSurface },
   amountWrap: {
     flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary,
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingLeft: spacing.lg,
