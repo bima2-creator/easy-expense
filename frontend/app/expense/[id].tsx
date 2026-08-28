@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 
-import { api, fileUrl } from "@/src/api";
+import { api, fileUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Expense } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { useCategories } from "@/src/categories";
@@ -94,7 +94,7 @@ export default function ExpenseDetail() {
     <View style={styles.screen}>
       <View style={styles.heroWrap}>
         {hasReceipt ? (
-          <Image source={{ uri: fileUrl(expense.receipt_path) }} style={styles.hero} contentFit="cover" transition={200} />
+          <Image source={{ uri: fileUrl(expense.receipt_path), headers: API_KEY_HEADERS }} style={styles.hero} contentFit="cover" transition={200} />
         ) : (
           <View style={[styles.hero, styles.heroPlaceholder, { backgroundColor: meta.color + "22" }]}>
             <Ionicons name={meta.icon} size={56} color={meta.color} />

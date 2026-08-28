@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-import { api, workOrderPdfUrl } from "@/src/api";
+import { api, workOrderPdfUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Expense, WorkOrder } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { formatMoney } from "@/src/lib";
@@ -79,7 +79,7 @@ export default function WorkOrderDetail() {
     setExporting(true);
     try {
       const target = FileSystem.cacheDirectory + `laporan_wo_${Date.now()}.pdf`;
-      const { uri } = await FileSystem.downloadAsync(url, target);
+      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Laporan Work Order" });
       } else { toast("PDF tersimpan di perangkat", "success"); }

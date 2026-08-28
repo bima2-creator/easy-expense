@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +20,16 @@ import ReceiptEditor from "@/src/components/ReceiptEditor";
 import { useToast } from "@/src/components/Toast";
 
 type Phase = "camera" | "edit" | "processing" | "review";
-type Shot = { uri: string; width: number; height: number };
+type Shot = { uri: string; width: number; height: number; mime?: string; name?: string };
+
+// Screenshot biasanya sudah rapi/full-frame (bukan foto struk fisik yang miring/ada
+// latar belakang meja dsb), jadi tidak perlu dipotong manual — langsung diproses.
+function looksLikeScreenshot(name?: string | null, uri?: string): boolean {
+  const n = (name || "").toLowerCase();
+  const u = (uri || "").toLowerCase();
+  return n.includes("screenshot") || n.includes("screen shot") || n.includes("tangkapan layar") ||
+    u.includes("screenshot");
+}
 
 export default function Scan() {
   const router = useRouter();
@@ -42,10 +52,10 @@ export default function Scan() {
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
 
-  const process = useCallback(async (uri: string) => {
+  const process = useCallback(async (uri: string, name = "receipt.jpg", mime = "image/jpeg") => {
     setPhase("processing");
     try {
-      const res = await api.scan(uri, "receipt.jpg", "image/jpeg");
+      const res = await api.scan(uri, name, mime);
       const ex = res.extracted;
       setReceiptPath(res.receipt_path);
       setForm((f) => ({
@@ -85,7 +95,35 @@ export default function Scan() {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.7 });
     if (!res.canceled && res.assets?.[0]) {
       const a = res.assets[0];
-      setShot({ uri: a.uri, width: a.width || 1000, height: a.height || 1400 });
+      const name = a.fileName || "receipt.jpg";
+      const mime = a.mimeType || "image/jpeg";
+      if (looksLikeScreenshot(name, a.uri)) {
+        setShot({ uri: a.uri, width: a.width || 1000, height: a.height || 1400, mime, name });
+        process(a.uri, name, mime);
+      } else {
+        setShot({ uri: a.uri, width: a.width || 1000, height: a.height || 1400, mime, name });
+        setPhase("edit");
+      }
+    }
+  };
+
+  // Impor gambar langsung dari penyimpanan/Files (untuk gambar yang tidak ada di galeri foto,
+  // misalnya yang diunduh dari WhatsApp/email). Hanya file gambar — tidak menerima PDF/dokumen lain.
+  const pickDocument = async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: "image/*",
+      copyToCacheDirectory: true,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    const name = a.name || "receipt.jpg";
+    const mime = a.mimeType || "image/jpeg";
+    if (looksLikeScreenshot(name, a.uri)) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setShot({ uri: a.uri, width: 1000, height: 1400, mime, name });
+      process(a.uri, name, mime);
+    } else {
+      setShot({ uri: a.uri, width: 1000, height: 1400, mime, name });
       setPhase("edit");
     }
   };
@@ -120,7 +158,7 @@ export default function Scan() {
         width={shot.width}
         height={shot.height}
         onCancel={() => setPhase("camera")}
-        onDone={(u) => { setShot((s) => (s ? { ...s, uri: u } : s)); process(u); }}
+        onDone={(u) => { setShot((s) => (s ? { ...s, uri: u } : s)); process(u, shot.name, shot.mime); }}
       />
     );
   }
@@ -202,6 +240,10 @@ export default function Scan() {
             <Ionicons name="image-outline" size={18} color="#fff" />
             <Text style={styles.permAltText}>Unggah dari galeri</Text>
           </Pressable>
+          <Pressable testID="import-document" onPress={pickDocument} style={styles.permAlt}>
+            <Ionicons name="document-attach-outline" size={18} color="#fff" />
+            <Text style={styles.permAltText}>Impor gambar dari file</Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -232,7 +274,9 @@ export default function Scan() {
         <Pressable testID="capture-btn" onPress={capture} style={styles.shutterOuter}>
           <View style={styles.shutterInner} />
         </Pressable>
-        <View style={{ width: 52 }} />
+        <Pressable testID="import-document" onPress={pickDocument} style={styles.roundBtn}>
+          <Ionicons name="document-attach" size={22} color="#fff" />
+        </Pressable>
       </View>
     </View>
   );

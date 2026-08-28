@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-import { api, projectPdfUrl } from "@/src/api";
+import { api, projectPdfUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Project, WorkOrder } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { formatMoney } from "@/src/lib";
@@ -66,7 +66,7 @@ export default function ProjectDetail() {
     setExporting(true);
     try {
       const target = FileSystem.cacheDirectory + `laporan_${Date.now()}.pdf`;
-      const { uri } = await FileSystem.downloadAsync(url, target);
+      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Laporan Proyek" });
       } else { toast("PDF tersimpan di perangkat", "success"); }

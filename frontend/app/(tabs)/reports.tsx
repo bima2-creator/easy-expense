@@ -8,7 +8,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as Haptics from "expo-haptics";
 
-import { api, csvUrl } from "@/src/api";
+import { api, csvUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Summary } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { formatMoney, MONTH_ID } from "@/src/lib";
@@ -48,7 +48,7 @@ export default function Reports() {
     setExporting(true);
     try {
       const target = FileSystem.cacheDirectory + `pengeluaran_${Date.now()}.csv`;
-      const { uri } = await FileSystem.downloadAsync(url, target);
+      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: "text/csv", dialogTitle: "Ekspor Pengeluaran" });
       } else { toast("CSV tersimpan di perangkat", "success"); }
