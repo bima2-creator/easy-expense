@@ -850,6 +850,16 @@ def _rl_image(raw: bytes, max_w_mm=80, max_h_mm=95):
     return RLImage(bio, width=w * ratio, height=h * ratio)
 
 
+def _no_receipt_box(w_mm, h_mm, muted, border):
+    t = Table([["Tanpa Struk"]], colWidths=[w_mm * mm], rowHeights=[h_mm * mm])
+    t.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (-1, -1), 0.6, border), ("TEXTCOLOR", (0, 0), (-1, -1), muted),
+        ("FONTSIZE", (0, 0), (-1, -1), 9), ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#F5F5F3")),
+    ]))
+    return t
+
+
 async def _gather_receipts(expenses):
     out = {}
     for e in expenses:
@@ -865,7 +875,7 @@ async def _gather_receipts(expenses):
 
 
 def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label="TOTAL"):
-    from reportlab.platypus import Image as RLImage, KeepTogether
+    from reportlab.platypus import Image as RLImage
     styles = getSampleStyleSheet()
     ink = rl_colors.HexColor("#1C1C1E")
     moss = rl_colors.HexColor("#4A7C59")
@@ -927,18 +937,50 @@ def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label
     ]))
     elements.append(total_tbl)
 
-    attach = [e for e in attach_exps if receipts.get(e["id"])]
+    attach = attach_exps
     if attach:
         elements.append(Spacer(1, 8 * mm))
-        elements.append(Paragraph(f"Lampiran Bukti Struk ({len(attach)})", h2))
+        with_receipt_count = sum(1 for e in attach if receipts.get(e["id"]))
+        elements.append(Paragraph(f"Lampiran Bukti Struk ({with_receipt_count} dari {len(attach)} transaksi)", h2))
+
+        # Grid 2 kolom supaya beberapa struk muat dalam satu halaman (target 4-6/halaman)
+        # tapi ukuran gambar tetap cukup besar untuk tetap terbaca.
+        COLS = 2
+        page_content_w = 178  # mm: A4 (210) dikurangi leftMargin+rightMargin (16+16)
+        cell_w_mm = page_content_w / COLS
+        img_max_w = cell_w_mm - 10  # sisakan ruang untuk padding kiri-kanan
+        img_max_h = 62  # dikecilkan supaya 3 baris (6 struk) muat per halaman penuh
+
+        cells = []
         for e in attach:
-            try:
-                img = _rl_image(receipts[e["id"]])
-                caption = Paragraph(
-                    f"{e.get('vendor','')} — {e.get('date','')} — <b>{rupiah(e.get('amount'))}</b>", cap)
-                elements.append(KeepTogether([caption, img, Spacer(1, 6 * mm)]))
-            except Exception as ex:
-                logger.error(f"embed receipt failed: {ex}")
+            caption = Paragraph(
+                f"{e.get('vendor','')} — {e.get('date','')}<br/><b>{rupiah(e.get('amount'))}</b>", cap)
+            raw = receipts.get(e["id"])
+            visual = None
+            if raw:
+                try:
+                    visual = _rl_image(raw, max_w_mm=img_max_w, max_h_mm=img_max_h)
+                except Exception as ex:
+                    logger.error(f"embed receipt failed: {ex}")
+            if visual is None:
+                visual = _no_receipt_box(img_max_w, img_max_h, muted, line)
+            cells.append([visual, Spacer(1, 2 * mm), caption])
+
+        while len(cells) % COLS != 0:
+            cells.append([Spacer(1, 1)])
+
+        rows = [cells[i:i + COLS] for i in range(0, len(cells), COLS)]
+        grid = Table(rows, colWidths=[cell_w_mm * mm] * COLS)
+        grid.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, line),
+        ]))
+        elements.append(grid)
 
     doc.build(elements)
 
