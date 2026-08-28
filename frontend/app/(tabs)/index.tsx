@@ -54,7 +54,7 @@ export default function Home() {
             <Text style={styles.greeting}>Easy Expense</Text>
             <Text style={styles.month}>{monthYearLabel()}</Text>
           </View>
-          <Pressable testID="home-settings" onPress={() => router.push("/categories")} style={styles.logoDot}>
+          <Pressable testID="home-settings" onPress={() => router.push("/settings")} style={styles.logoDot}>
             <Ionicons name="options-outline" size={20} color={colors.onSurfaceInverse} />
           </Pressable>
         </View>

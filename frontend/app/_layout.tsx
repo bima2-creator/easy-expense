@@ -1,7 +1,7 @@
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { LogBox } from "react-native";
+import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -12,6 +12,8 @@ import { useFonts } from "expo-font";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { ToastProvider } from "@/src/components/Toast";
 import { CategoriesProvider } from "@/src/categories";
+import { AppLockProvider, useAppLock } from "@/src/applock";
+import LockScreen from "@/src/components/LockScreen";
 
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
@@ -53,21 +55,35 @@ export default function RootLayout() {
           <BottomSheetModalProvider>
             <CategoriesProvider>
               <ToastProvider>
-                <StatusBar style="dark" />
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#F9F9F6" } }}>
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen name="scan" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
-                  <Stack.Screen name="add" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
-                  <Stack.Screen name="expense/[id]" options={{ animation: "slide_from_right" }} />
-                  <Stack.Screen name="project/[id]" options={{ animation: "slide_from_right" }} />
-                  <Stack.Screen name="workorder/[id]" options={{ animation: "slide_from_right" }} />
-                  <Stack.Screen name="categories" options={{ animation: "slide_from_right" }} />
-                </Stack>
+                <AppLockProvider>
+                  <StatusBar style="dark" />
+                  <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#F9F9F6" } }}>
+                    <Stack.Screen name="(tabs)" />
+                    <Stack.Screen name="scan" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom" }} />
+                    <Stack.Screen name="add" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+                    <Stack.Screen name="expense/[id]" options={{ animation: "slide_from_right" }} />
+                    <Stack.Screen name="project/[id]" options={{ animation: "slide_from_right" }} />
+                    <Stack.Screen name="workorder/[id]" options={{ animation: "slide_from_right" }} />
+                    <Stack.Screen name="categories" options={{ animation: "slide_from_right" }} />
+                    <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
+                  </Stack>
+                  <LockOverlay />
+                </AppLockProvider>
               </ToastProvider>
             </CategoriesProvider>
           </BottomSheetModalProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+function LockOverlay() {
+  const { isLocked } = useAppLock();
+  if (!isLocked) return null;
+  return (
+    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+      <LockScreen />
+    </View>
   );
 }

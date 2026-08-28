@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "Finance Bitech",
+    "slug": "finance-bitech",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "financebitech",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.smartreceipts.y17nvd",
+      "bundleIdentifier": "id.co.bitech.financeapp",
       "infoPlist": {
         "NSCameraUsageDescription": "Scan receipts to track your expenses",
         "NSPhotoLibraryUsageDescription": "Upload receipt photos to track expenses"
@@ -22,8 +22,13 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.smartreceipts.y17nvd",
-      "permissions": ["android.permission.CAMERA"]
+      "package": "id.co.bitech.financeapp",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -56,6 +61,19 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cccb1084-167b-418e-9691-973f060f11f6"
+      }
+    },
+    "owner": "bima2",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/cccb1084-167b-418e-9691-973f060f11f6"
     }
   }
 }

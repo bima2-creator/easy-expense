@@ -123,9 +123,9 @@ export default function Reports() {
                   <View style={styles.catTop}>
                     <View style={styles.catLeft}>
                       <View style={[styles.catDot, { backgroundColor: meta.color }]} />
-                      <Text style={styles.catName}>{c.category}</Text>
+                      <Text style={styles.catName} numberOfLines={1}>{c.category}</Text>
                     </View>
-                    <Text style={styles.catAmount}>{formatMoney(c.amount)}</Text>
+                    <Text style={styles.catAmount} numberOfLines={1}>{formatMoney(c.amount)}</Text>
                   </View>
                   <View style={styles.track}><View style={[styles.fill, { width: `${(c.amount / maxCat) * 100}%`, backgroundColor: meta.color }]} /></View>
                 </View>
@@ -141,7 +141,7 @@ export default function Reports() {
                   <View key={p.name + i} style={[styles.projItem, i > 0 && styles.catItemBorder]}>
                     <View style={styles.projIcon}><Ionicons name="folder-outline" size={16} color={colors.brandTertiary} /></View>
                     <Text style={styles.catName} numberOfLines={1}>{p.name}</Text>
-                    <Text style={styles.catAmount}>{formatMoney(p.amount)}</Text>
+                    <Text style={styles.catAmount} numberOfLines={1}>{formatMoney(p.amount)}</Text>
                   </View>
                 ))}
               </View>
@@ -187,10 +187,10 @@ const styles = StyleSheet.create({
   catItem: { paddingVertical: spacing.md, gap: spacing.sm },
   catItemBorder: { borderTopWidth: 1, borderTopColor: colors.divider },
   catTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  catLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  catLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1, flexShrink: 1 },
   catDot: { width: 10, height: 10, borderRadius: 5 },
-  catName: { fontFamily: fonts.medium, fontSize: type.base, color: colors.onSurface, flex: 1 },
-  catAmount: { fontFamily: fonts.display, fontSize: type.base, color: colors.onSurface },
+  catName: { fontFamily: fonts.medium, fontSize: type.base, color: colors.onSurface, flex: 1, flexShrink: 1, marginRight: spacing.sm },
+  catAmount: { fontFamily: fonts.display, fontSize: type.base, color: colors.onSurface, flexShrink: 0 },
   projItem: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
   projIcon: { width: 32, height: 32, borderRadius: radius.sm, backgroundColor: colors.brandTertiary + "18", alignItems: "center", justifyContent: "center" },
   track: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceTertiary, overflow: "hidden" },

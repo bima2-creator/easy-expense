@@ -9,6 +9,9 @@ export default function InputModal({
   placeholder,
   initialValue = "",
   confirmLabel = "Simpan",
+  keyboardType,
+  secureTextEntry,
+  maxLength,
   onClose,
   onSubmit,
 }: {
@@ -18,6 +21,9 @@ export default function InputModal({
   placeholder: string;
   initialValue?: string;
   confirmLabel?: string;
+  keyboardType?: "default" | "numeric" | "number-pad";
+  secureTextEntry?: boolean;
+  maxLength?: number;
   onClose: () => void;
   onSubmit: (value: string) => void;
 }) {
@@ -47,6 +53,9 @@ export default function InputModal({
               style={styles.input}
               onSubmitEditing={submit}
               returnKeyType="done"
+              keyboardType={keyboardType}
+              secureTextEntry={secureTextEntry}
+              maxLength={maxLength}
             />
             <View style={styles.actions}>
               <Pressable testID="input-modal-cancel" onPress={onClose} style={[styles.btn, styles.cancel]}>

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import requests
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.cors import CORSMiddleware
@@ -38,6 +38,23 @@ db = client[os.environ['DB_NAME']]
 
 APP_NAME = "easy-expense"
 
+# ---------------------------------------------------------------------------
+# Simple shared-secret auth (single-user app, no login flow needed).
+# Backend ini publik lewat Cloudflare Tunnel tanpa proteksi apa pun sebelumnya —
+# setiap request ke /api/* sekarang wajib bawa header X-API-Key yang cocok.
+# ---------------------------------------------------------------------------
+API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+    raise RuntimeError("API_KEY belum diset di backend/.env — wajib diisi supaya API tidak terbuka untuk umum")
+
+
+async def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="API key tidak valid")
+
+
+api_router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
+
 # Local disk storage for receipt images (replaces Emergent Object Storage)
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,7 +63,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-api_router = APIRouter(prefix="/api")
 
 DEFAULT_CATEGORIES = [
     {"name": "Makan", "icon": "restaurant-outline", "color": "#C85A44"},
