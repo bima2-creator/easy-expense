@@ -146,6 +146,7 @@ class Project(BaseModel):
     name: str
     client: Optional[str] = ""
     color: Optional[str] = "#4A7C59"
+    parent_id: Optional[str] = None  # kalau diisi, project ini adalah sub-proyek dari project lain
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -153,6 +154,7 @@ class ProjectCreate(BaseModel):
     name: str
     client: Optional[str] = ""
     color: Optional[str] = "#4A7C59"
+    parent_id: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -526,17 +528,31 @@ async def delete_category(category_id: str):
 # Projects
 # ---------------------------------------------------------------------------
 @api_router.get("/projects")
-async def list_projects():
-    docs = await db.projects.find().sort("created_at", -1).to_list(1000)
+async def list_projects(parent_id: Optional[str] = Query(None), all: bool = Query(False)):
+    # Default (tanpa parent_id): cuma project level teratas (parent_id kosong) —
+    # ini termasuk semua project lama sebelum fitur sub-proyek ada, karena query
+    # {"parent_id": None} di MongoDB juga cocok dengan dokumen yang field-nya
+    # belum ada sama sekali (tidak perlu migrasi data).
+    # Kirim ?parent_id=<id project> untuk ambil daftar sub-proyek dari project itu.
+    # Kirim ?all=true untuk ambil semua project di semua level sekaligus.
+    if all:
+        q = {}
+    elif parent_id:
+        q = {"parent_id": parent_id}
+    else:
+        q = {"parent_id": None}
+    docs = await db.projects.find(q).sort("created_at", -1).to_list(1000)
     result = []
     for d in docs:
         p = Project(**d).dict()
         wo_count = await db.work_orders.count_documents({"project_id": p["id"]})
+        sub_count = await db.projects.count_documents({"parent_id": p["id"]})
         agg = await db.expenses.aggregate([
             {"$match": {"project_id": p["id"]}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
         ]).to_list(1)
         p["work_order_count"] = wo_count
+        p["sub_project_count"] = sub_count
         p["total"] = round(agg[0]["total"], 2) if agg else 0
         p["expense_count"] = agg[0]["count"] if agg else 0
         result.append(p)
@@ -577,6 +593,9 @@ async def delete_project(project_id: str):
     # detach work orders and expenses
     await db.work_orders.delete_many({"project_id": project_id})
     await db.expenses.update_many({"project_id": project_id}, {"$set": {"project_id": None, "work_order_id": None}})
+    # sub-proyek TIDAK ikut terhapus — naik jadi project level teratas supaya
+    # datanya (work order, pengeluaran, dst di dalamnya) tetap aman
+    await db.projects.update_many({"parent_id": project_id}, {"$set": {"parent_id": None}})
     return {"ok": True}
 
 
@@ -970,42 +989,60 @@ def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label
         img_max_w = cell_w_mm - 10  # sisakan ruang untuk padding kiri-kanan
         img_max_h = 62  # dikecilkan supaya 3 baris (6 struk) muat per halaman penuh
 
-        cells = []
-        for e in attach:
-            caption = Paragraph(
-                f"{e.get('vendor','')} — {e.get('date','')}<br/><b>{rupiah(e.get('amount'))}</b>", cap)
-            raw = receipts.get(e["id"])
-            visual = None
-            if raw:
-                try:
-                    visual = _rl_image(raw, max_w_mm=img_max_w, max_h_mm=img_max_h)
-                except Exception as ex:
-                    logger.error(f"embed receipt failed: {ex}")
-            if visual is None:
-                visual = _no_receipt_box(img_max_w, img_max_h, muted, line)
-            cells.append([visual, Spacer(1, 2 * mm), caption])
+        groups_with_exp = [g for g in groups if g["expenses"]]
+        show_divider = len(groups_with_exp) > 1  # cuma perlu pembatas kalau lampiran gabungan >1 WO
 
-        while len(cells) % COLS != 0:
-            cells.append([Spacer(1, 1)])
+        for gi, g in enumerate(groups_with_exp):
+            if show_divider:
+                if gi > 0:
+                    elements.append(Spacer(1, 3 * mm))
+                wo_bar = Table([[g["name"]]], colWidths=[page_content_w * mm])
+                wo_bar.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), rl_colors.HexColor("#EFEDE6")),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), ink),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                elements.append(wo_bar)
+                elements.append(Spacer(1, 3 * mm))
 
-        rows = [cells[i:i + COLS] for i in range(0, len(cells), COLS)]
-        grid = Table(rows, colWidths=[cell_w_mm * mm] * COLS)
-        grid.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ("LEFTPADDING", (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-            ("LINEBELOW", (0, 0), (-1, -2), 0.4, line),
-        ]))
-        elements.append(grid)
+            cells = []
+            for e in g["expenses"]:
+                caption = Paragraph(
+                    f"{e.get('vendor','')} — {e.get('date','')}<br/><b>{rupiah(e.get('amount'))}</b>", cap)
+                raw = receipts.get(e["id"])
+                visual = None
+                if raw:
+                    try:
+                        visual = _rl_image(raw, max_w_mm=img_max_w, max_h_mm=img_max_h)
+                    except Exception as ex:
+                        logger.error(f"embed receipt failed: {ex}")
+                if visual is None:
+                    visual = _no_receipt_box(img_max_w, img_max_h, muted, line)
+                cells.append([visual, Spacer(1, 2 * mm), caption])
+
+            while len(cells) % COLS != 0:
+                cells.append([Spacer(1, 1)])
+
+            rows = [cells[i:i + COLS] for i in range(0, len(cells), COLS)]
+            grid = Table(rows, colWidths=[cell_w_mm * mm] * COLS)
+            grid.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("LINEBELOW", (0, 0), (-1, -2), 0.4, line),
+            ]))
+            elements.append(grid)
 
     doc.build(elements)
 
 
 @api_router.get("/projects/{project_id}/pdf")
-async def project_pdf(project_id: str):
+async def project_pdf(project_id: str, work_order_ids: Optional[str] = Query(None)):
     proj = await db.projects.find_one({"id": project_id})
     if not proj:
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
@@ -1013,15 +1050,25 @@ async def project_pdf(project_id: str):
     work_orders = await db.work_orders.find({"project_id": project_id}).sort("created_at", 1).to_list(2000)
     all_exp = await db.expenses.find({"project_id": project_id}).sort("date", 1).to_list(5000)
 
+    # work_order_ids: daftar id WO yang dipilih user (pisah koma), plus sentinel
+    # "__unassigned__" untuk menyertakan pengeluaran tanpa WO. Kalau parameter ini
+    # tidak dikirim sama sekali, default-nya sertakan semua (perilaku lama).
+    include_unassigned = True
+    if work_order_ids is not None:
+        selected = set(x for x in work_order_ids.split(",") if x)
+        include_unassigned = "__unassigned__" in selected
+        work_orders = [w for w in work_orders if w["id"] in selected]
+
     groups = []
     for w in work_orders:
         groups.append({"name": f"Work Order: {w['name']}",
                        "expenses": [e for e in all_exp if e.get("work_order_id") == w["id"]]})
     unassigned = [e for e in all_exp if not e.get("work_order_id")]
-    if unassigned:
+    if unassigned and include_unassigned:
         groups.append({"name": "Tanpa Work Order", "expenses": unassigned})
 
-    receipts = await _gather_receipts(all_exp)
+    included_exp = [e for g in groups for e in g["expenses"]]
+    receipts = await _gather_receipts(included_exp)
     subtitle = [f"Proyek: <b>{proj['name']}</b>"]
     if proj.get("client"):
         subtitle.append(f"Klien: {proj['client']}")
