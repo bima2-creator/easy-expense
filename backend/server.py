@@ -6,6 +6,7 @@ import time
 import uuid
 import json
 import base64
+import zipfile
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
@@ -1056,6 +1057,94 @@ async def work_order_pdf(wo_id: str):
     safe = "".join(ch for ch in wo["name"] if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
     return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf",
                              headers={"Content-Disposition": f"attachment; filename=laporan_wo_{safe or 'wo'}.pdf"})
+
+
+BACKUP_COLLECTIONS = ["categories", "projects", "work_orders", "expenses"]
+
+
+def _strip_mongo_id(doc: dict) -> dict:
+    doc = dict(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/backup")
+async def create_backup():
+    """Export semua data (kategori, proyek, work order, pengeluaran) + file struk
+    jadi satu file .zip yang bisa disimpan di luar VPS (Google Drive, HP, dst)."""
+    data = {"version": 1, "exported_at": now_iso(), "app": APP_NAME}
+    for coll in BACKUP_COLLECTIONS:
+        docs = await db[coll].find().to_list(100000)
+        data[coll] = [_strip_mongo_id(d) for d in docs]
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("data.json", json.dumps(data, ensure_ascii=False, indent=2))
+        # Sertakan semua file struk yang ada di disk. Path di dalam zip disamakan
+        # dengan yang tersimpan di field receipt_path supaya gampang dipetakan balik.
+        if UPLOAD_DIR.exists():
+            for f in UPLOAD_DIR.rglob("*"):
+                if f.is_file():
+                    rel = f.relative_to(UPLOAD_DIR)
+                    zf.write(f, arcname=f"files/{rel.as_posix()}")
+
+    buf.seek(0)
+    filename = f"easy-expense-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@api_router.post("/restore")
+async def restore_backup(file: UploadFile = File(...)):
+    """Import balik file backup .zip.
+
+    Aman dijalankan berkali-kali / restore backup yang sama dua kali: setiap
+    dokumen di-upsert berdasarkan field 'id' (bukan insert baru), jadi tidak
+    akan menggandakan data. Data yang ADA SEKARANG tapi TIDAK ADA di file
+    backup tetap dibiarkan apa adanya (restore ini menggabungkan/memperbarui,
+    bukan menghapus/menimpa total)."""
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="File backup kosong")
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="File bukan .zip backup yang valid")
+
+    try:
+        data = json.loads(zf.read("data.json"))
+    except KeyError:
+        raise HTTPException(status_code=400, detail="File backup tidak lengkap (data.json tidak ditemukan)")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="File backup rusak (data.json tidak bisa dibaca)")
+
+    summary = {}
+    for coll in BACKUP_COLLECTIONS:
+        docs = data.get(coll, [])
+        count = 0
+        for doc in docs:
+            doc_id = doc.get("id")
+            if not doc_id:
+                continue
+            doc = _strip_mongo_id(doc)
+            await db[coll].update_one({"id": doc_id}, {"$set": doc}, upsert=True)
+            count += 1
+        summary[coll] = count
+
+    files_restored = 0
+    for name in zf.namelist():
+        if name.startswith("files/") and not name.endswith("/"):
+            rel = name[len("files/"):]
+            dest = (UPLOAD_DIR / rel).resolve()
+            if not str(dest).startswith(str(UPLOAD_DIR.resolve())):
+                continue  # jaga-jaga kalau nama file di zip aneh/path traversal
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(name))
+            files_restored += 1
+
+    summary["files"] = files_restored
+    return {"ok": True, "restored": summary}
 
 
 @api_router.get("/")
