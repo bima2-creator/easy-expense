@@ -31,6 +31,7 @@ export const fileUrl = (path?: string | null) => (path ? `${BASE}/files/${path}`
 export const projectPdfUrl = (id: string) => `${BASE}/projects/${id}/pdf`;
 export const workOrderPdfUrl = (id: string) => `${BASE}/work-orders/${id}/pdf`;
 export const csvUrl = () => `${BASE}/reports/export`;
+export const backupUrl = () => `${BASE}/backup`;
 
 export const api = {
   base: BASE,
@@ -91,5 +92,17 @@ export const api = {
       form.append("file", { uri, name, type: mime } as any);
     }
     return j(await fetch(`${BASE}/scan`, { method: "POST", headers: { ...API_KEY_HEADERS }, body: form }));
+  },
+
+  // backup & restore
+  async restoreBackup(uri: string, name = "backup.zip"): Promise<{ ok: boolean; restored: Record<string, number> }> {
+    const form = new FormData();
+    if (Platform.OS === "web") {
+      const blob = await (await fetch(uri)).blob();
+      form.append("file", blob, name);
+    } else {
+      form.append("file", { uri, name, type: "application/zip" } as any);
+    }
+    return j(await fetch(`${BASE}/restore`, { method: "POST", headers: { ...API_KEY_HEADERS }, body: form }));
   },
 };

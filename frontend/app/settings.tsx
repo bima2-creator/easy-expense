@@ -1,12 +1,17 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Switch, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, Switch, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import * as DocumentPicker from "expo-document-picker";
 
 import { colors, fonts, spacing, radius, type } from "@/src/theme";
 import { useAppLock, LOCK_TIMEOUT_OPTIONS } from "@/src/applock";
+import { useCategories } from "@/src/categories";
+import { api, backupUrl, API_KEY_HEADERS } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import InputModal from "@/src/components/InputModal";
 import ConfirmModal from "@/src/components/ConfirmModal";
@@ -15,11 +20,61 @@ export default function Settings() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { refresh: refreshCategories } = useCategories();
   const { enabled, timeoutMinutes, setupPin, disableLock, setTimeoutMinutes } = useAppLock();
 
   const [pinStep, setPinStep] = useState<"none" | "new" | "confirm">("none");
   const [firstPin, setFirstPin] = useState("");
   const [disableConfirmOpen, setDisableConfirmOpen] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreConfirm, setRestoreConfirm] = useState<{ uri: string; name: string } | null>(null);
+
+  const doBackup = async () => {
+    setBackingUp(true);
+    try {
+      const url = backupUrl();
+      if (Platform.OS === "web") {
+        window.open(url, "_blank");
+      } else {
+        const target = FileSystem.cacheDirectory + `easy-expense-backup-${Date.now()}.zip`;
+        const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
+        if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: "application/zip" });
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      toast("Gagal membuat backup", "error");
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const pickRestoreFile = async () => {
+    const res = await DocumentPicker.getDocumentAsync({ type: "application/zip", copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setRestoreConfirm({ uri: a.uri, name: a.name || "backup.zip" });
+  };
+
+  const doRestore = async () => {
+    if (!restoreConfirm) return;
+    setRestoring(true);
+    try {
+      const result = await api.restoreBackup(restoreConfirm.uri, restoreConfirm.name);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const r = result.restored || {};
+      toast(
+        `Restore selesai: ${r.categories ?? 0} kategori, ${r.projects ?? 0} proyek, ${r.work_orders ?? 0} WO, ${r.expenses ?? 0} pengeluaran`,
+        "success",
+      );
+      await refreshCategories();
+    } catch (e: any) {
+      toast(e?.message || "Gagal restore backup", "error");
+    } finally {
+      setRestoring(false);
+      setRestoreConfirm(null);
+    }
+  };
 
   const onTogglePin = (value: boolean) => {
     if (value) {
@@ -115,6 +170,25 @@ export default function Settings() {
             </>
           )}
         </View>
+
+        <Text style={styles.sectionTitle}>Data</Text>
+        <View style={styles.card}>
+          <Pressable testID="settings-backup" onPress={doBackup} disabled={backingUp} style={styles.cardRow}>
+            <Ionicons name="cloud-download-outline" size={20} color={colors.onSurface} />
+            <Text style={styles.rowText}>Backup Data</Text>
+            {backingUp ? <ActivityIndicator size="small" color={colors.muted} /> : <Ionicons name="chevron-forward" size={18} color={colors.muted} />}
+          </Pressable>
+          <View style={styles.divider} />
+          <Pressable testID="settings-restore" onPress={pickRestoreFile} disabled={restoring} style={styles.cardRow}>
+            <Ionicons name="cloud-upload-outline" size={20} color={colors.onSurface} />
+            <Text style={styles.rowText}>Restore Data</Text>
+            {restoring ? <ActivityIndicator size="small" color={colors.muted} /> : <Ionicons name="chevron-forward" size={18} color={colors.muted} />}
+          </Pressable>
+          <Text style={styles.hint}>
+            Backup menyimpan semua kategori, proyek, work order, pengeluaran, dan foto struk jadi satu file .zip.
+            Restore aman dijalankan berkali-kali — data tidak akan menjadi dobel.
+          </Text>
+        </View>
       </ScrollView>
 
       <InputModal
@@ -149,6 +223,14 @@ export default function Settings() {
         onClose={() => setDisableConfirmOpen(false)}
         onConfirm={confirmDisable}
       />
+      <ConfirmModal
+        visible={!!restoreConfirm}
+        title="Restore data ini?"
+        message={`Data dari "${restoreConfirm?.name}" akan digabungkan dengan data yang ada sekarang. Aman diulang, tidak akan menggandakan data.`}
+        confirmLabel="Restore"
+        onClose={() => setRestoreConfirm(null)}
+        onConfirm={doRestore}
+      />
     </View>
   );
 }
@@ -165,6 +247,7 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, fontFamily: fonts.medium, fontSize: type.base, color: colors.onSurface },
   divider: { height: 1, backgroundColor: colors.divider, marginHorizontal: -spacing.lg },
   subLabel: { fontFamily: fonts.medium, fontSize: type.sm, color: colors.muted, paddingTop: spacing.lg },
+  hint: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, paddingVertical: spacing.md, lineHeight: 18 },
   timeoutRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingVertical: spacing.md },
   chip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
