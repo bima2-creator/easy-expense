@@ -45,8 +45,11 @@ export const api = {
 
   // projects
   async projects(): Promise<Project[]> { return j(await get(`/projects`)); },
+  async subProjects(parentId: string): Promise<Project[]> { return j(await get(`/projects?parent_id=${encodeURIComponent(parentId)}`)); },
   async getProject(id: string): Promise<Project> { return j(await get(`/projects/${id}`)); },
-  async createProject(name: string, client?: string): Promise<Project> { return j(await post("/projects", { name, client })); },
+  async createProject(name: string, client?: string, parentId?: string): Promise<Project> {
+    return j(await post("/projects", { name, client, parent_id: parentId }));
+  },
   async updateProject(id: string, body: Partial<Project>): Promise<Project> { return j(await put(`/projects/${id}`, body)); },
   async deleteProject(id: string): Promise<void> { await del(`/projects/${id}`); },
 

@@ -13,8 +13,10 @@ export type Project = {
   name: string;
   client?: string;
   color?: string;
+  parent_id?: string | null;
   created_at: string;
   work_order_count?: number;
+  sub_project_count?: number;
   total?: number;
   expense_count?: number;
 };
