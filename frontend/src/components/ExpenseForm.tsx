@@ -37,9 +37,11 @@ export default function ExpenseForm({
   onChange: (patch: Partial<FormState>) => void;
 }) {
   const { categories, refresh: refreshCats } = useCategories();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [topProjects, setTopProjects] = useState<Project[]>([]);
+  const [activeTopId, setActiveTopId] = useState<string | null>(null);
+  const [subProjects, setSubProjects] = useState<Project[]>([]);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [modal, setModal] = useState<null | "project" | "workorder">(null);
+  const [modal, setModal] = useState<null | "project" | "subproject" | "workorder">(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const parsedDate = (() => {
@@ -54,19 +56,49 @@ export default function ExpenseForm({
     onChange({ date: iso });
   };
 
-  const loadProjects = async () => { try { setProjects(await api.projects()); } catch {} };
-  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => { api.projects().then(setTopProjects).catch(() => {}); }, []);
 
+  // value.project_id bisa jadi proyek level teratas ATAU sub-proyek. Setiap kali
+  // berubah (termasuk saat pertama kali edit pengeluaran lama), cari tahu proyek
+  // induknya supaya chip "PROYEK" tetap nyala di induk yang benar, lalu muat
+  // daftar sub-proyek & work order sesuai scope yang sedang aktif.
   useEffect(() => {
-    if (!value.project_id) { setWorkOrders([]); return; }
-    api.workOrders(value.project_id).then(setWorkOrders).catch(() => setWorkOrders([]));
+    let cancelled = false;
+    (async () => {
+      if (!value.project_id) {
+        setActiveTopId(null); setSubProjects([]); setWorkOrders([]);
+        return;
+      }
+      try {
+        const proj = await api.getProject(value.project_id);
+        if (cancelled) return;
+        const topId = proj.parent_id || proj.id;
+        setActiveTopId(topId);
+        const [subs, wos] = await Promise.all([api.subProjects(topId), api.workOrders(value.project_id)]);
+        if (cancelled) return;
+        setSubProjects(subs);
+        setWorkOrders(wos);
+      } catch {
+        if (!cancelled) { setSubProjects([]); setWorkOrders([]); }
+      }
+    })();
+    return () => { cancelled = true; };
   }, [value.project_id]);
 
   const addProject = async (name: string) => {
     try {
       const p = await api.createProject(name);
-      await loadProjects();
+      setTopProjects((prev) => [p, ...prev]);
       onChange({ project_id: p.id, work_order_id: null });
+    } catch {}
+    setModal(null);
+  };
+  const addSubProject = async (name: string) => {
+    if (!activeTopId) return;
+    try {
+      const sp = await api.createProject(name, undefined, activeTopId);
+      setSubProjects((prev) => [sp, ...prev]);
+      onChange({ project_id: sp.id, work_order_id: null });
     } catch {}
     setModal(null);
   };
@@ -134,8 +166,8 @@ export default function ExpenseForm({
           >
             <Text style={[styles.smallChipText, !value.project_id && styles.smallChipTextActive]}>Tanpa Proyek</Text>
           </Pressable>
-          {projects.map((p) => {
-            const active = value.project_id === p.id;
+          {topProjects.map((p) => {
+            const active = activeTopId === p.id;
             return (
               <Pressable
                 key={p.id}
@@ -153,6 +185,37 @@ export default function ExpenseForm({
           </Pressable>
         </ScrollView>
       </Field>
+
+      {activeTopId && subProjects.length > 0 ? (
+        <Field label="SUB-PROYEK">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            <Pressable
+              testID="form-subproject-none"
+              onPress={() => onChange({ project_id: activeTopId, work_order_id: null })}
+              style={[styles.smallChip, value.project_id === activeTopId && styles.smallChipActive]}
+            >
+              <Text style={[styles.smallChipText, value.project_id === activeTopId && styles.smallChipTextActive]}>Langsung di Proyek Ini</Text>
+            </Pressable>
+            {subProjects.map((sp) => {
+              const active = value.project_id === sp.id;
+              return (
+                <Pressable
+                  key={sp.id}
+                  testID={`form-subproject-${sp.id}`}
+                  onPress={() => onChange({ project_id: sp.id, work_order_id: null })}
+                  style={[styles.smallChip, active && styles.smallChipActive]}
+                >
+                  <Text style={[styles.smallChipText, active && styles.smallChipTextActive]}>{sp.name}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable testID="form-subproject-add" onPress={() => setModal("subproject")} style={styles.addChip}>
+              <Ionicons name="add" size={16} color={colors.brandTertiary} />
+              <Text style={styles.addChipText}>Sub-Proyek</Text>
+            </Pressable>
+          </ScrollView>
+        </Field>
+      ) : null}
 
       {value.project_id ? (
         <Field label="WORK ORDER">
@@ -238,6 +301,15 @@ export default function ExpenseForm({
         confirmLabel="Buat"
         onClose={() => setModal(null)}
         onSubmit={addProject}
+      />
+      <InputModal
+        visible={modal === "subproject"}
+        title="Sub-Proyek Baru"
+        subtitle="Pecah proyek jadi beberapa lokasi/site"
+        placeholder="mis. Site Jakarta"
+        confirmLabel="Buat"
+        onClose={() => setModal(null)}
+        onSubmit={addSubProject}
       />
       <InputModal
         visible={modal === "workorder"}
