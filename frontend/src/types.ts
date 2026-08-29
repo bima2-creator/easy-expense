@@ -4,6 +4,7 @@ export type Category = {
   icon: string;
   color: string;
   is_default: boolean;
+  order: number;
   created_at: string;
 };
 

@@ -37,9 +37,10 @@ export const api = {
 
   // categories
   async categories(): Promise<Category[]> { return j(await get(`/categories`)); },
-  async createCategory(name: string): Promise<Category> { return j(await post("/categories", { name })); },
-  async updateCategory(id: string, name: string): Promise<Category> { return j(await put(`/categories/${id}`, { name })); },
+  async createCategory(name: string, icon?: string): Promise<Category> { return j(await post("/categories", { name, icon })); },
+  async updateCategory(id: string, name: string, icon?: string): Promise<Category> { return j(await put(`/categories/${id}`, { name, icon })); },
   async deleteCategory(id: string): Promise<void> { await del(`/categories/${id}`); },
+  async reorderCategories(ids: string[]): Promise<void> { await put(`/categories/reorder`, { ids }); },
 
   // projects
   async projects(): Promise<Project[]> { return j(await get(`/projects`)); },

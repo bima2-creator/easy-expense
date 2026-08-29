@@ -122,15 +122,22 @@ class Category(BaseModel):
     icon: str = "pricetag-outline"
     color: str = "#4A7C59"
     is_default: bool = False
+    order: int = 0
     created_at: str = Field(default_factory=now_iso)
 
 
 class CategoryCreate(BaseModel):
     name: str
+    icon: Optional[str] = None
 
 
 class CategoryUpdate(BaseModel):
     name: str
+    icon: Optional[str] = None
+
+
+class CategoryReorder(BaseModel):
+    ids: List[str]  # urutan id kategori sesuai keinginan user, dari atas ke bawah
 
 
 class Project(BaseModel):
@@ -455,14 +462,14 @@ async def extract_receipt(image_bytes: bytes, content_type: str, category_names:
 async def ensure_default_categories():
     count = await db.categories.count_documents({})
     if count == 0:
-        for c in DEFAULT_CATEGORIES:
-            cat = Category(name=c["name"], icon=c["icon"], color=c["color"], is_default=True)
+        for i, c in enumerate(DEFAULT_CATEGORIES):
+            cat = Category(name=c["name"], icon=c["icon"], color=c["color"], is_default=True, order=i)
             await db.categories.insert_one(cat.dict())
 
 
 @api_router.get("/categories", response_model=List[Category])
 async def list_categories():
-    docs = await db.categories.find().sort("created_at", 1).to_list(1000)
+    docs = await db.categories.find().sort("order", 1).to_list(1000)
     return [Category(**d) for d in docs]
 
 
@@ -475,9 +482,16 @@ async def create_category(body: CategoryCreate):
     if existing:
         raise HTTPException(status_code=400, detail="Kategori sudah ada")
     n = await db.categories.count_documents({})
-    cat = Category(name=name, color=CUSTOM_COLORS[n % len(CUSTOM_COLORS)])
+    cat = Category(name=name, icon=body.icon or "pricetag-outline", color=CUSTOM_COLORS[n % len(CUSTOM_COLORS)], order=n)
     await db.categories.insert_one(cat.dict())
     return cat
+
+
+@api_router.put("/categories/reorder")
+async def reorder_categories(body: CategoryReorder):
+    for i, cid in enumerate(body.ids):
+        await db.categories.update_one({"id": cid}, {"$set": {"order": i}})
+    return {"ok": True}
 
 
 @api_router.put("/categories/{category_id}", response_model=Category)
@@ -487,9 +501,13 @@ async def update_category(category_id: str, body: CategoryUpdate):
         raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
     new_name = body.name.strip()
     old_name = doc["name"]
-    await db.categories.update_one({"id": category_id}, {"$set": {"name": new_name}})
+    update = {"name": new_name}
+    if body.icon:
+        update["icon"] = body.icon
+    await db.categories.update_one({"id": category_id}, {"$set": update})
     # propagate rename to expenses
-    await db.expenses.update_many({"category": old_name}, {"$set": {"category": new_name}})
+    if new_name != old_name:
+        await db.expenses.update_many({"category": old_name}, {"$set": {"category": new_name}})
     doc = await db.categories.find_one({"id": category_id})
     return Category(**doc)
 
@@ -1056,10 +1074,21 @@ app.add_middleware(
 )
 
 
+async def ensure_category_order():
+    # Migrasi: kategori lama (dibuat sebelum fitur urutan-manual ini ada) belum punya
+    # field 'order' -> isi berdasarkan created_at supaya urutan yang sudah ada tidak berubah.
+    missing = await db.categories.count_documents({"order": {"$exists": False}})
+    if missing > 0:
+        docs = await db.categories.find().sort("created_at", 1).to_list(1000)
+        for i, d in enumerate(docs):
+            await db.categories.update_one({"id": d["id"]}, {"$set": {"order": i}})
+
+
 @app.on_event("startup")
 async def startup():
     try:
         await ensure_default_categories()
+        await ensure_category_order()
         logger.info("Default categories ensured")
     except Exception as e:
         logger.error(f"Category seed failed: {e}")
