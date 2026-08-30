@@ -714,16 +714,17 @@ async def scan_receipt(file: UploadFile = File(...)):
         }
         return {"receipt_path": path, "extracted": extracted, "extraction_failed": True, "duplicate": None}
 
-    # Deteksi kemungkinan struk duplikat: vendor sama (case-insensitive), tanggal
-    # sama, jumlah sama (toleransi kecil untuk pembulatan). Ini cuma peringatan,
+    # Deteksi kemungkinan struk duplikat. Dicocokkan berdasarkan tanggal + jumlah
+    # (toleransi kecil) — BUKAN vendor persis, karena hasil OCR untuk teks vendor
+    # sering meleset dikit antar-scan (mis. struk transfer bank: "m-Transfer" vs
+    # "n-Transfer" salah baca huruf), jadi vendor persis terlalu ketat dan malah
+    # sering gagal mendeteksi struk yang sebenarnya sama. Ini cuma peringatan,
     # bukan blokir keras — user tetap boleh lanjut kalau memang bukan duplikat.
     duplicate = None
-    vendor = (extracted.get("vendor") or "").strip()
     amount = extracted.get("amount") or 0
     date_val = extracted.get("date")
-    if vendor and amount and date_val:
+    if amount and date_val:
         dup = await db.expenses.find_one({
-            "vendor": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"},
             "date": date_val,
             "amount": {"$gte": amount - 1, "$lte": amount + 1},
         })
