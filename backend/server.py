@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import requests
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -147,6 +150,8 @@ class Project(BaseModel):
     client: Optional[str] = ""
     color: Optional[str] = "#4A7C59"
     parent_id: Optional[str] = None  # kalau diisi, project ini adalah sub-proyek dari project lain
+    is_paid: bool = False  # untuk pengeluaran yang langsung di bawah proyek/sub-proyek (tanpa WO)
+    paid_at: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -161,6 +166,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     client: Optional[str] = None
     color: Optional[str] = None
+    is_paid: Optional[bool] = None
 
 
 class WorkOrder(BaseModel):
@@ -579,8 +585,12 @@ async def update_project(project_id: str, body: ProjectUpdate):
     doc = await db.projects.find_one({"id": project_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
-    updates = {k: v for k, v in body.dict().items() if v is not None}
-    await db.projects.update_one({"id": project_id}, {"$set": updates})
+    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if k != "is_paid"}
+    if body.is_paid is not None:
+        updates["is_paid"] = body.is_paid
+        updates["paid_at"] = now_iso() if body.is_paid else None
+    if updates:
+        await db.projects.update_one({"id": project_id}, {"$set": updates})
     doc = await db.projects.find_one({"id": project_id})
     return Project(**doc)
 
@@ -702,9 +712,29 @@ async def scan_receipt(file: UploadFile = File(...)):
             "date": datetime.now(timezone.utc).date().isoformat(),
             "category": category_names[0], "notes": "",
         }
-        return {"receipt_path": path, "extracted": extracted, "extraction_failed": True}
+        return {"receipt_path": path, "extracted": extracted, "extraction_failed": True, "duplicate": None}
 
-    return {"receipt_path": path, "extracted": extracted, "extraction_failed": False}
+    # Deteksi kemungkinan struk duplikat: vendor sama (case-insensitive), tanggal
+    # sama, jumlah sama (toleransi kecil untuk pembulatan). Ini cuma peringatan,
+    # bukan blokir keras — user tetap boleh lanjut kalau memang bukan duplikat.
+    duplicate = None
+    vendor = (extracted.get("vendor") or "").strip()
+    amount = extracted.get("amount") or 0
+    date_val = extracted.get("date")
+    if vendor and amount and date_val:
+        dup = await db.expenses.find_one({
+            "vendor": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"},
+            "date": date_val,
+            "amount": {"$gte": amount - 1, "$lte": amount + 1},
+        })
+        if dup:
+            duplicate = {
+                "expense_id": dup["id"], "vendor": dup.get("vendor"),
+                "date": dup.get("date"), "amount": dup.get("amount"),
+                "category": dup.get("category"),
+            }
+
+    return {"receipt_path": path, "extracted": extracted, "extraction_failed": False, "duplicate": duplicate}
 
 
 @api_router.get("/files/{path:path}")
@@ -720,8 +750,23 @@ async def get_file(path: str):
 # ---------------------------------------------------------------------------
 # Expenses
 # ---------------------------------------------------------------------------
+async def _scope_is_paid(project_id: Optional[str], work_order_id: Optional[str]) -> bool:
+    """Cek apakah WO atau Proyek/Sub-Proyek tujuan sudah ditandai lunas.
+    WO diprioritaskan kalau ada (expense di bawah WO ikut status WO-nya,
+    bukan status proyek induknya)."""
+    if work_order_id:
+        wo = await db.work_orders.find_one({"id": work_order_id})
+        return bool(wo and wo.get("is_paid"))
+    if project_id:
+        proj = await db.projects.find_one({"id": project_id})
+        return bool(proj and proj.get("is_paid"))
+    return False
+
+
 @api_router.post("/expenses", response_model=Expense)
 async def create_expense(body: ExpenseCreate):
+    if await _scope_is_paid(body.project_id, body.work_order_id):
+        raise HTTPException(status_code=400, detail="WO/Proyek ini sudah lunas — tidak bisa menambah pengeluaran baru di sini.")
     data = body.dict()
     if not data.get("date"):
         data.pop("date", None)
@@ -730,12 +775,14 @@ async def create_expense(body: ExpenseCreate):
     return exp
 
 
-@api_router.get("/expenses", response_model=List[Expense])
+@api_router.get("/expenses")
 async def list_expenses(
     category: Optional[str] = Query(None),
     project_id: Optional[str] = Query(None),
     work_order_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
 ):
     q = {}
     if category and category != "Semua":
@@ -746,16 +793,47 @@ async def list_expenses(
         q["work_order_id"] = work_order_id
     if search:
         q["vendor"] = {"$regex": search, "$options": "i"}
+    if date_from or date_to:
+        date_q = {}
+        if date_from:
+            date_q["$gte"] = date_from
+        if date_to:
+            date_q["$lte"] = date_to
+        q["date"] = date_q
     docs = await db.expenses.find(q).sort("date", -1).to_list(2000)
-    return [Expense(**d) for d in docs]
+
+    wo_ids = {d["work_order_id"] for d in docs if d.get("work_order_id")}
+    proj_ids = {d["project_id"] for d in docs if d.get("project_id") and not d.get("work_order_id")}
+    wo_paid = {}
+    if wo_ids:
+        for w in await db.work_orders.find({"id": {"$in": list(wo_ids)}}).to_list(2000):
+            wo_paid[w["id"]] = bool(w.get("is_paid"))
+    proj_paid = {}
+    if proj_ids:
+        for p in await db.projects.find({"id": {"$in": list(proj_ids)}}).to_list(2000):
+            proj_paid[p["id"]] = bool(p.get("is_paid"))
+
+    result = []
+    for d in docs:
+        e = Expense(**d).dict()
+        if d.get("work_order_id"):
+            e["locked"] = wo_paid.get(d["work_order_id"], False)
+        elif d.get("project_id"):
+            e["locked"] = proj_paid.get(d["project_id"], False)
+        else:
+            e["locked"] = False
+        result.append(e)
+    return result
 
 
-@api_router.get("/expenses/{expense_id}", response_model=Expense)
+@api_router.get("/expenses/{expense_id}")
 async def get_expense(expense_id: str):
     doc = await db.expenses.find_one({"id": expense_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
-    return Expense(**doc)
+    e = Expense(**doc).dict()
+    e["locked"] = await _scope_is_paid(doc.get("project_id"), doc.get("work_order_id"))
+    return e
 
 
 @api_router.put("/expenses/{expense_id}", response_model=Expense)
@@ -763,7 +841,14 @@ async def update_expense(expense_id: str, body: ExpenseUpdate):
     doc = await db.expenses.find_one({"id": expense_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
+    if await _scope_is_paid(doc.get("project_id"), doc.get("work_order_id")):
+        raise HTTPException(status_code=403, detail="Pengeluaran ini terkunci karena WO/Proyeknya sudah lunas.")
     updates = {k: v for k, v in body.dict(exclude_unset=True).items()}
+    target_project = updates.get("project_id", doc.get("project_id"))
+    target_wo = updates.get("work_order_id", doc.get("work_order_id"))
+    if (target_project, target_wo) != (doc.get("project_id"), doc.get("work_order_id")):
+        if await _scope_is_paid(target_project, target_wo):
+            raise HTTPException(status_code=400, detail="Tidak bisa memindahkan pengeluaran ke WO/Proyek yang sudah lunas.")
     updates["updated_at"] = now_iso()
     await db.expenses.update_one({"id": expense_id}, {"$set": updates})
     doc = await db.expenses.find_one({"id": expense_id})
@@ -772,9 +857,12 @@ async def update_expense(expense_id: str, body: ExpenseUpdate):
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str):
-    res = await db.expenses.delete_one({"id": expense_id})
-    if res.deleted_count == 0:
+    doc = await db.expenses.find_one({"id": expense_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Pengeluaran tidak ditemukan")
+    if await _scope_is_paid(doc.get("project_id"), doc.get("work_order_id")):
+        raise HTTPException(status_code=403, detail="Pengeluaran ini terkunci karena WO/Proyeknya sudah lunas.")
+    await db.expenses.delete_one({"id": expense_id})
     return {"ok": True}
 
 
@@ -782,7 +870,7 @@ async def delete_expense(expense_id: str):
 # Reports
 # ---------------------------------------------------------------------------
 @api_router.get("/reports/summary")
-async def reports_summary(period: str = Query("month")):
+async def reports_summary(period: str = Query("month"), date_from: Optional[str] = Query(None), date_to: Optional[str] = Query(None)):
     docs = await db.expenses.find().to_list(5000)
     now = datetime.now(timezone.utc)
 
@@ -790,6 +878,12 @@ async def reports_summary(period: str = Query("month")):
         try:
             dt = datetime.fromisoformat(d["date"])
         except Exception:
+            return True
+        if period == "custom":
+            if date_from and dt.date() < datetime.fromisoformat(date_from).date():
+                return False
+            if date_to and dt.date() > datetime.fromisoformat(date_to).date():
+                return False
             return True
         if period == "week":
             return (now.date() - dt.date()).days <= 7
@@ -846,6 +940,66 @@ async def reports_summary(period: str = Query("month")):
         "by_project": by_project,
         "trend": trend,
     }
+
+
+@api_router.get("/reports/export-xlsx")
+async def export_xlsx():
+    docs = await db.expenses.find().sort("date", -1).to_list(5000)
+    projects = {p["id"]: p["name"] for p in await db.projects.find().to_list(1000)}
+    project_paid = {p["id"]: bool(p.get("is_paid")) for p in await db.projects.find().to_list(1000)}
+    work_orders = {w["id"]: w["name"] for w in await db.work_orders.find().to_list(2000)}
+    wo_paid = {w["id"]: bool(w.get("is_paid")) for w in await db.work_orders.find().to_list(2000)}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pengeluaran"
+
+    headers = ["Tanggal", "Vendor", "Kategori", "Proyek", "Work Order", "Jumlah (Rp)", "Billable", "Lunas", "Catatan"]
+    ws.append(headers)
+    header_fill = PatternFill(start_color="1C1C1E", end_color="1C1C1E", fill_type="solid")
+    for col_idx, _ in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for d in docs:
+        wo_id = d.get("work_order_id")
+        proj_id = d.get("project_id")
+        locked = wo_paid.get(wo_id, False) if wo_id else project_paid.get(proj_id, False) if proj_id else False
+        ws.append([
+            d.get("date", ""), d.get("vendor", ""), d.get("category", ""),
+            projects.get(proj_id, ""), work_orders.get(wo_id, ""),
+            int(round(float(d.get("amount") or 0))),
+            "Ya" if d.get("is_billable") else "Tidak",
+            "Ya" if locked else "Tidak",
+            d.get("notes", ""),
+        ])
+
+    # Lebar kolom otomatis menyesuaikan konten, biar langsung enak dibaca tanpa perlu resize manual
+    for col_idx, header in enumerate(headers, start=1):
+        max_len = len(header)
+        for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+            val = row[0].value
+            if val is not None:
+                max_len = max(max_len, len(str(val)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 3, 40)
+
+    # Format kolom Jumlah sebagai angka dengan pemisah ribuan, memudahkan bikin pivot table
+    for row in ws.iter_rows(min_row=2, min_col=6, max_col=6):
+        row[0].number_format = "#,##0"
+
+    ws.freeze_panes = "A2"  # header tetap kelihatan saat scroll panjang
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"pengeluaran_{datetime.now(timezone.utc).date().isoformat()}.xlsx"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @api_router.get("/reports/export")
@@ -912,7 +1066,7 @@ async def _gather_receipts(expenses):
     return out
 
 
-def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label="TOTAL"):
+def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label="TOTAL", include_attachments=True):
     from reportlab.platypus import Image as RLImage
     styles = getSampleStyleSheet()
     ink = rl_colors.HexColor("#1C1C1E")
@@ -975,7 +1129,7 @@ def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label
     ]))
     elements.append(total_tbl)
 
-    attach = attach_exps
+    attach = attach_exps if include_attachments else []
     if attach:
         elements.append(Spacer(1, 8 * mm))
         with_receipt_count = sum(1 for e in attach if receipts.get(e["id"]))
@@ -1080,6 +1234,50 @@ async def project_pdf(project_id: str, work_order_ids: Optional[str] = Query(Non
     safe = "".join(ch for ch in proj["name"] if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
     return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf",
                              headers={"Content-Disposition": f"attachment; filename=laporan_{safe or 'proyek'}.pdf"})
+
+
+@api_router.get("/projects/{project_id}/invoice")
+async def project_invoice(project_id: str, work_order_ids: Optional[str] = Query(None)):
+    """Dokumen tagihan internal ke tim Finance — cuma berisi pengeluaran yang
+    ditandai 'Bisa ditagihkan' (is_billable), tanpa lampiran foto struk (beda
+    dari laporan pengeluaran biasa yang menyertakan semua transaksi + bukti)."""
+    proj = await db.projects.find_one({"id": project_id})
+    if not proj:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
+
+    work_orders = await db.work_orders.find({"project_id": project_id}).sort("created_at", 1).to_list(2000)
+    all_exp = await db.expenses.find({"project_id": project_id, "is_billable": True}).sort("date", 1).to_list(5000)
+
+    include_unassigned = True
+    if work_order_ids is not None:
+        selected = set(x for x in work_order_ids.split(",") if x)
+        include_unassigned = "__unassigned__" in selected
+        work_orders = [w for w in work_orders if w["id"] in selected]
+
+    groups = []
+    for w in work_orders:
+        groups.append({"name": f"Work Order: {w['name']}",
+                       "expenses": [e for e in all_exp if e.get("work_order_id") == w["id"]]})
+    unassigned = [e for e in all_exp if not e.get("work_order_id")]
+    if unassigned and include_unassigned:
+        groups.append({"name": "Tanpa Work Order", "expenses": unassigned})
+
+    total_billable = sum(e.get("amount", 0) for g in groups for e in g["expenses"])
+    if total_billable == 0:
+        raise HTTPException(status_code=400, detail="Tidak ada pengeluaran 'Bisa ditagihkan' pada proyek/WO yang dipilih.")
+
+    subtitle = [f"Proyek: <b>{proj['name']}</b>"]
+    if proj.get("client"):
+        subtitle.append(f"Klien: {proj['client']}")
+    subtitle.append(f"Dibuat: {datetime.now(timezone.utc).strftime('%d %b %Y')}")
+    subtitle.append("Hanya memuat pengeluaran yang ditandai <b>Bisa Ditagihkan</b>")
+
+    buf = io.BytesIO()
+    _build_expense_pdf(buf, "TAGIHAN KE FINANCE", subtitle, groups, {}, "TOTAL TAGIHAN", include_attachments=False)
+    buf.seek(0)
+    safe = "".join(ch for ch in proj["name"] if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf",
+                             headers={"Content-Disposition": f"attachment; filename=tagihan_{safe or 'proyek'}.pdf"})
 
 
 @api_router.get("/work-orders/{wo_id}/pdf")
