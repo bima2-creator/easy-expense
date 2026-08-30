@@ -80,9 +80,14 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (next: AppStateStatus) => {
       const prev = appState.current;
-      if (prev === "active" && (next === "inactive" || next === "background")) {
+      // Cuma "background" yang dihitung sebagai user benar-benar keluar app (tekan
+      // home, pindah app lain, layar mati). "inactive" itu status transisi sesaat
+      // yang juga muncul saat kamera/scan struk jalan atau dialog izin muncul —
+      // kalau ikut dihitung, timeout "Langsung" akan salah mengunci app padahal
+      // user cuma lagi motret struk, bukan meninggalkan app.
+      if (prev === "active" && next === "background") {
         await AsyncStorage.setItem(LAST_BG_KEY, String(Date.now()));
-      } else if ((prev === "inactive" || prev === "background") && next === "active") {
+      } else if (prev === "background" && next === "active") {
         if (enabled) {
           const lastBg = await AsyncStorage.getItem(LAST_BG_KEY);
           const elapsedMs = lastBg ? Date.now() - parseInt(lastBg, 10) : Infinity;

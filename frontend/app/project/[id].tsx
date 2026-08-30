@@ -121,9 +121,21 @@ export default function ProjectDetail() {
     setInvoicing(true);
     try {
       const target = FileSystem.cacheDirectory + `tagihan_${Date.now()}.pdf`;
-      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
+      const result = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
+      if (result.status !== 200) {
+        // Backend menolak (mis. tidak ada pengeluaran "Bisa Ditagihkan") — isi filenya
+        // sebenarnya pesan error JSON, bukan PDF, jadi jangan dibagikan sebagai file.
+        let msg = "Gagal buat tagihan";
+        try {
+          const errText = await FileSystem.readAsStringAsync(result.uri);
+          msg = JSON.parse(errText)?.detail || msg;
+        } catch {}
+        await FileSystem.deleteAsync(result.uri, { idempotent: true });
+        toast(msg, "error");
+        return;
+      }
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Tagihan ke Finance" });
+        await Sharing.shareAsync(result.uri, { mimeType: "application/pdf", dialogTitle: "Tagihan ke Finance" });
       } else { toast("PDF tersimpan di perangkat", "success"); }
     } catch (e: any) {
       toast(e?.message || "Gagal buat tagihan", "error");
