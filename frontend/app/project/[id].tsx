@@ -7,7 +7,7 @@ import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-import { api, projectPdfUrl, invoicePdfUrl, API_KEY_HEADERS } from "@/src/api";
+import { api, projectPdfUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Project, WorkOrder } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { formatMoney } from "@/src/lib";
@@ -30,8 +30,6 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
-  const [invoicing, setInvoicing] = useState(false);
   const [addWO, setAddWO] = useState(false);
   const [addSub, setAddSub] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -110,36 +108,6 @@ export default function ProjectDetail() {
       } else { toast("PDF tersimpan di perangkat", "success"); }
     } catch { toast("Gagal ekspor PDF", "error"); }
     finally { setExporting(false); }
-  };
-
-  const exportInvoice = async (selectedIds: string[]) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setInvoicePickerOpen(false);
-    const qs = `?work_order_ids=${encodeURIComponent(selectedIds.join(","))}`;
-    const url = invoicePdfUrl(id!) + qs;
-    if (Platform.OS === "web") { window.open(url, "_blank"); return; }
-    setInvoicing(true);
-    try {
-      const target = FileSystem.cacheDirectory + `tagihan_${Date.now()}.pdf`;
-      const result = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
-      if (result.status !== 200) {
-        // Backend menolak (mis. tidak ada pengeluaran "Bisa Ditagihkan") — isi filenya
-        // sebenarnya pesan error JSON, bukan PDF, jadi jangan dibagikan sebagai file.
-        let msg = "Gagal buat tagihan";
-        try {
-          const errText = await FileSystem.readAsStringAsync(result.uri);
-          msg = JSON.parse(errText)?.detail || msg;
-        } catch {}
-        await FileSystem.deleteAsync(result.uri, { idempotent: true });
-        toast(msg, "error");
-        return;
-      }
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(result.uri, { mimeType: "application/pdf", dialogTitle: "Tagihan ke Finance" });
-      } else { toast("PDF tersimpan di perangkat", "success"); }
-    } catch (e: any) {
-      toast(e?.message || "Gagal buat tagihan", "error");
-    } finally { setInvoicing(false); }
   };
 
   if (loading || !project) {
@@ -254,19 +222,11 @@ export default function ProjectDetail() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Pressable testID="export-pdf" onPress={() => setPickerOpen(true)} disabled={exporting} style={[styles.pdfBtn, { flex: 1 }]}>
+        <Pressable testID="export-pdf" onPress={() => setPickerOpen(true)} disabled={exporting} style={styles.pdfBtn}>
           {exporting ? <ActivityIndicator color={colors.onSurfaceInverse} /> : (
             <>
               <Ionicons name="document-text-outline" size={18} color={colors.onSurfaceInverse} />
-              <Text style={styles.pdfText}>Laporan PDF</Text>
-            </>
-          )}
-        </Pressable>
-        <Pressable testID="export-invoice" onPress={() => setInvoicePickerOpen(true)} disabled={invoicing} style={[styles.pdfBtn, styles.invoiceBtn, { flex: 1 }]}>
-          {invoicing ? <ActivityIndicator color={colors.brand} /> : (
-            <>
-              <Ionicons name="cash-outline" size={18} color={colors.brand} />
-              <Text style={[styles.pdfText, { color: colors.brand }]}>Tagihan Finance</Text>
+              <Text style={styles.pdfText}>Ekspor Laporan PDF</Text>
             </>
           )}
         </Pressable>
@@ -277,12 +237,6 @@ export default function ProjectDetail() {
         options={pickerOptions}
         onClose={() => setPickerOpen(false)}
         onConfirm={exportPdf}
-      />
-      <WorkOrderPickerModal
-        visible={invoicePickerOpen}
-        options={pickerOptions}
-        onClose={() => setInvoicePickerOpen(false)}
-        onConfirm={exportInvoice}
       />
 
       <InputModal visible={addWO} title="Work Order Baru" placeholder="mis. WO-001 Instalasi" confirmLabel="Buat" onClose={() => setAddWO(false)} onSubmit={createWO} />
@@ -321,9 +275,8 @@ const styles = StyleSheet.create({
   woName: { flexShrink: 1, fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurface },
   woMeta: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   woTotal: { fontFamily: fonts.display, fontSize: type.base, color: colors.onSurface },
-  bottomBar: { flexDirection: "row", gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+  bottomBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   pdfBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brand, height: 52, borderRadius: radius.md },
-  invoiceBtn: { backgroundColor: colors.brand + "18" },
   pdfText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurfaceInverse },
   paidBadge: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.md },
   paidBadgeOn: { borderColor: colors.success + "55", backgroundColor: colors.success + "14" },

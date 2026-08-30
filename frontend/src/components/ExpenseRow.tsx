@@ -32,17 +32,12 @@ export default function ExpenseRow({
       </View>
       <View style={styles.right}>
         <Text style={styles.amount}>{formatMoney(expense.amount)}</Text>
-        <View style={styles.badgeRow}>
-          {expense.locked ? (
-            <View style={styles.lockedBadge}>
-              <Ionicons name="lock-closed" size={9} color={colors.success} />
-              <Text style={styles.lockedText}>Lunas</Text>
-            </View>
-          ) : null}
-          {expense.is_billable ? (
-            <View style={styles.billable}><Text style={styles.billableText}>Tagih</Text></View>
-          ) : null}
-        </View>
+        {expense.locked ? (
+          <View style={styles.lockedBadge}>
+            <Ionicons name="lock-closed" size={9} color={colors.success} />
+            <Text style={styles.lockedText}>Lunas</Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -61,9 +56,6 @@ const styles = StyleSheet.create({
   sub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   right: { alignItems: "flex-end" },
   amount: { fontFamily: fonts.display, fontSize: type.lg, color: colors.onSurface },
-  badgeRow: { flexDirection: "row", gap: 4, marginTop: 4 },
-  lockedBadge: { flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: colors.success + "1E", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
+  lockedBadge: { flexDirection: "row", alignItems: "center", gap: 2, marginTop: 4, backgroundColor: colors.success + "1E", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
   lockedText: { fontFamily: fonts.medium, fontSize: 10, color: colors.success },
-  billable: { backgroundColor: colors.brandTertiary + "1A", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
-  billableText: { fontFamily: fonts.medium, fontSize: 10, color: colors.brandTertiary },
 });

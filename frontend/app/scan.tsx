@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Linking } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,6 +19,7 @@ import ExpenseForm, { FormState } from "@/src/components/ExpenseForm";
 import ReceiptEditor from "@/src/components/ReceiptEditor";
 import { useToast } from "@/src/components/Toast";
 import type { DuplicateInfo } from "@/src/types";
+import { useAppLock } from "@/src/applock";
 
 type Phase = "camera" | "edit" | "processing" | "review";
 type Shot = { uri: string; width: number; height: number; mime?: string; name?: string };
@@ -36,9 +37,19 @@ export default function Scan() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { setLockSuppressed } = useAppLock();
   const cameraRef = useRef<CameraView>(null);
   const { categories } = useCategories();
   const params = useLocalSearchParams<{ project_id?: string; work_order_id?: string }>();
+
+  // Izin kamera, pengambilan foto, dan proses OCR kadang memicu perpindahan status
+  // app yang salah dikira "keluar app" di sebagian HP (beda-beda tiap merek) —
+  // jeda kunci PIN/fingerprint selama masih di halaman scan ini supaya tidak
+  // salah minta PIN di tengah proses.
+  useEffect(() => {
+    setLockSuppressed(true);
+    return () => setLockSuppressed(false);
+  }, []);
 
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>("camera");

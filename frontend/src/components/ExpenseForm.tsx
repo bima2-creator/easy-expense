@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Switch, StyleSheet, Platform } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, Platform } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, fonts, spacing, radius, type } from "@/src/theme";
@@ -279,20 +279,6 @@ export default function ExpenseForm({
         />
       </Field>
 
-      <View style={styles.billableRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.billableTitle}>Bisa ditagihkan</Text>
-          <Text style={styles.billableSub}>Tandai untuk masuk ke invoice klien</Text>
-        </View>
-        <Switch
-          testID="form-billable-switch"
-          value={value.is_billable}
-          onValueChange={(v) => onChange({ is_billable: v })}
-          trackColor={{ true: colors.brandTertiary, false: colors.borderStrong }}
-          thumbColor="#fff"
-        />
-      </View>
-
       <InputModal
         visible={modal === "project"}
         title="Proyek Baru"
@@ -362,10 +348,4 @@ const styles = StyleSheet.create({
   },
   addChipText: { fontFamily: fonts.semibold, fontSize: type.base, color: colors.brandTertiary },
   notes: { minHeight: 72, textAlignVertical: "top", paddingTop: spacing.md },
-  billableRow: {
-    flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, gap: spacing.md,
-  },
-  billableTitle: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurface },
-  billableSub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
 });

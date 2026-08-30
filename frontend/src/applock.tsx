@@ -33,6 +33,7 @@ type AppLockContextType = {
   setBiometricEnabled: (v: boolean) => Promise<void>;
   tryBiometricUnlock: () => Promise<boolean>;
   unlock: () => void;
+  setLockSuppressed: (v: boolean) => void;
 };
 
 const AppLockContext = createContext<AppLockContextType | null>(null);
@@ -46,6 +47,9 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricEnabled, setBiometricEnabledState] = useState(false);
   const appState = useRef<AppStateStatus>(AppState.currentState);
+  const suppressRef = useRef(false);
+
+  const setLockSuppressed = useCallback((v: boolean) => { suppressRef.current = v; }, []);
 
   useEffect(() => {
     (async () => {
@@ -88,7 +92,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       if (prev === "active" && next === "background") {
         await AsyncStorage.setItem(LAST_BG_KEY, String(Date.now()));
       } else if (prev === "background" && next === "active") {
-        if (enabled) {
+        if (enabled && !suppressRef.current) {
           const lastBg = await AsyncStorage.getItem(LAST_BG_KEY);
           const elapsedMs = lastBg ? Date.now() - parseInt(lastBg, 10) : Infinity;
           if (elapsedMs >= timeoutMinutes * 60000) setIsLocked(true);
@@ -155,6 +159,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
       value={{
         ready, enabled, hasPin, timeoutMinutes, isLocked, biometricAvailable, biometricEnabled,
         setupPin, disableLock, verifyPin, setTimeoutMinutes, setBiometricEnabled, tryBiometricUnlock, unlock,
+        setLockSuppressed,
       }}
     >
       {children}
