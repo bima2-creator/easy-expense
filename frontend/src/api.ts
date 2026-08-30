@@ -31,7 +31,9 @@ export const fileUrl = (path?: string | null) => (path ? `${BASE}/files/${path}`
 export const projectPdfUrl = (id: string) => `${BASE}/projects/${id}/pdf`;
 export const workOrderPdfUrl = (id: string) => `${BASE}/work-orders/${id}/pdf`;
 export const csvUrl = () => `${BASE}/reports/export`;
+export const xlsxUrl = () => `${BASE}/reports/export-xlsx`;
 export const backupUrl = () => `${BASE}/backup`;
+export const invoicePdfUrl = (projectId: string) => `${BASE}/projects/${projectId}/invoice`;
 
 export const api = {
   base: BASE,
@@ -68,12 +70,14 @@ export const api = {
   async deleteWorkOrder(id: string): Promise<void> { await del(`/work-orders/${id}`); },
 
   // expenses
-  async listExpenses(params: { category?: string; search?: string; project_id?: string; work_order_id?: string } = {}): Promise<Expense[]> {
+  async listExpenses(params: { category?: string; search?: string; project_id?: string; work_order_id?: string; date_from?: string; date_to?: string } = {}): Promise<Expense[]> {
     const q = new URLSearchParams();
     if (params.category && params.category !== "Semua") q.set("category", params.category);
     if (params.search) q.set("search", params.search);
     if (params.project_id) q.set("project_id", params.project_id);
     if (params.work_order_id) q.set("work_order_id", params.work_order_id);
+    if (params.date_from) q.set("date_from", params.date_from);
+    if (params.date_to) q.set("date_to", params.date_to);
     const qs = q.toString();
     return j(await get(`/expenses${qs ? `?${qs}` : ""}`));
   },
@@ -83,7 +87,12 @@ export const api = {
   async deleteExpense(id: string): Promise<void> { await del(`/expenses/${id}`); },
 
   // reports
-  async summary(period: string): Promise<Summary> { return j(await get(`/reports/summary?period=${period}`)); },
+  async summary(period: string, dateFrom?: string, dateTo?: string): Promise<Summary> {
+    const q = new URLSearchParams({ period });
+    if (dateFrom) q.set("date_from", dateFrom);
+    if (dateTo) q.set("date_to", dateTo);
+    return j(await get(`/reports/summary?${q.toString()}`));
+  },
 
   // scan
   async scan(uri: string, name = "receipt.jpg", mime = "image/jpeg"): Promise<ScanResult> {

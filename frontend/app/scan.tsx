@@ -13,11 +13,12 @@ import Animated, { FadeIn } from "react-native-reanimated";
 
 import { api } from "@/src/api";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
-import { todayISO } from "@/src/lib";
+import { todayISO, formatMoney, formatDate } from "@/src/lib";
 import { useCategories } from "@/src/categories";
 import ExpenseForm, { FormState } from "@/src/components/ExpenseForm";
 import ReceiptEditor from "@/src/components/ReceiptEditor";
 import { useToast } from "@/src/components/Toast";
+import type { DuplicateInfo } from "@/src/types";
 
 type Phase = "camera" | "edit" | "processing" | "review";
 type Shot = { uri: string; width: number; height: number; mime?: string; name?: string };
@@ -43,6 +44,7 @@ export default function Scan() {
   const [phase, setPhase] = useState<Phase>("camera");
   const [shot, setShot] = useState<Shot | null>(null);
   const [receiptPath, setReceiptPath] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
     vendor: "", amount: "", date: todayISO(), category: categories[0]?.name || "Makan",
@@ -54,10 +56,12 @@ export default function Scan() {
 
   const process = useCallback(async (uri: string, name = "receipt.jpg", mime = "image/jpeg") => {
     setPhase("processing");
+    setDuplicate(null);
     try {
       const res = await api.scan(uri, name, mime);
       const ex = res.extracted;
       setReceiptPath(res.receipt_path);
+      setDuplicate(res.duplicate || null);
       setForm((f) => ({
         ...f,
         vendor: ex.vendor || "",
@@ -66,7 +70,10 @@ export default function Scan() {
         category: ex.category || categories[0]?.name || "Makan",
         notes: ex.notes || "",
       }));
-      if (res.extraction_failed) {
+      if (res.duplicate) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        toast("Mirip dengan struk yang sudah ada", "info");
+      } else if (res.extraction_failed) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         toast("Struk tidak terbaca — isi manual", "info");
       } else {
@@ -146,7 +153,7 @@ export default function Scan() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       toast("Pengeluaran disimpan", "success");
       router.back();
-    } catch { toast("Gagal menyimpan", "error"); }
+    } catch (e: any) { toast(e?.message || "Gagal menyimpan", "error"); }
     finally { setSaving(false); }
   };
 
@@ -197,6 +204,25 @@ export default function Scan() {
               <View style={styles.aiBadge}>
                 <Ionicons name="sparkles" size={13} color={colors.brandTertiary} />
                 <Text style={styles.aiBadgeText}>Diekstrak AI</Text>
+              </View>
+            </View>
+          )}
+          {duplicate && (
+            <View style={styles.dupBanner}>
+              <View style={styles.dupHeader}>
+                <Ionicons name="warning" size={16} color={colors.warning} />
+                <Text style={styles.dupTitle}>Kemungkinan struk duplikat</Text>
+              </View>
+              <Text style={styles.dupText}>
+                Sudah ada pengeluaran mirip: {duplicate.vendor} — {formatDate(duplicate.date)} — {formatMoney(duplicate.amount)}
+              </Text>
+              <View style={styles.dupActions}>
+                <Pressable testID="dup-view-existing" onPress={() => router.push(`/expense/${duplicate.expense_id}`)} style={styles.dupBtn}>
+                  <Text style={styles.dupBtnText}>Lihat yang lama</Text>
+                </Pressable>
+                <Pressable testID="dup-dismiss" onPress={() => setDuplicate(null)} style={[styles.dupBtn, styles.dupBtnGhost]}>
+                  <Text style={[styles.dupBtnText, styles.dupBtnGhostText]}>Bukan duplikat, lanjutkan</Text>
+                </Pressable>
               </View>
             </View>
           )}
@@ -315,6 +341,15 @@ const styles = StyleSheet.create({
   headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   reviewTitle: { fontFamily: fonts.bold, fontSize: type.xl, color: colors.onSurface },
   thumbWrap: { alignItems: "center", marginBottom: spacing.xl },
+  dupBanner: { backgroundColor: colors.warning + "14", borderWidth: 1, borderColor: colors.warning + "40", borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.lg, gap: spacing.sm },
+  dupHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  dupTitle: { fontFamily: fonts.semibold, fontSize: type.base, color: colors.warning },
+  dupText: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.onSurface },
+  dupActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  dupBtn: { flex: 1, height: 38, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", backgroundColor: colors.warning },
+  dupBtnText: { fontFamily: fonts.semibold, fontSize: type.sm, color: "#fff" },
+  dupBtnGhost: { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.warning },
+  dupBtnGhostText: { color: colors.warning },
   thumb: { width: 120, height: 150, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   aiBadge: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.sm, backgroundColor: colors.brandTertiary + "1A", paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radius.pill },
   aiBadgeText: { fontFamily: fonts.semibold, fontSize: type.sm, color: colors.brandTertiary },

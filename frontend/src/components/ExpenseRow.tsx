@@ -19,7 +19,7 @@ export default function ExpenseRow({
     <Pressable
       testID={`expense-row-${expense.id}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.row, expense.locked && styles.rowLocked, pressed && styles.pressed]}
     >
       <View style={[styles.iconWrap, { backgroundColor: meta.color + "18" }]}>
         <Ionicons name={meta.icon} size={20} color={meta.color} />
@@ -32,9 +32,17 @@ export default function ExpenseRow({
       </View>
       <View style={styles.right}>
         <Text style={styles.amount}>{formatMoney(expense.amount)}</Text>
-        {expense.is_billable ? (
-          <View style={styles.billable}><Text style={styles.billableText}>Tagih</Text></View>
-        ) : null}
+        <View style={styles.badgeRow}>
+          {expense.locked ? (
+            <View style={styles.lockedBadge}>
+              <Ionicons name="lock-closed" size={9} color={colors.success} />
+              <Text style={styles.lockedText}>Lunas</Text>
+            </View>
+          ) : null}
+          {expense.is_billable ? (
+            <View style={styles.billable}><Text style={styles.billableText}>Tagih</Text></View>
+          ) : null}
+        </View>
       </View>
     </Pressable>
   );
@@ -45,6 +53,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg, gap: spacing.md, backgroundColor: colors.surfaceSecondary,
   },
+  rowLocked: { backgroundColor: colors.success + "0A" },
   pressed: { backgroundColor: colors.surfaceTertiary },
   iconWrap: { width: 44, height: 44, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   mid: { flex: 1 },
@@ -52,6 +61,9 @@ const styles = StyleSheet.create({
   sub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   right: { alignItems: "flex-end" },
   amount: { fontFamily: fonts.display, fontSize: type.lg, color: colors.onSurface },
-  billable: { marginTop: 4, backgroundColor: colors.brandTertiary + "1A", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
+  badgeRow: { flexDirection: "row", gap: 4, marginTop: 4 },
+  lockedBadge: { flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: colors.success + "1E", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
+  lockedText: { fontFamily: fonts.medium, fontSize: 10, color: colors.success },
+  billable: { backgroundColor: colors.brandTertiary + "1A", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
   billableText: { fontFamily: fonts.medium, fontSize: 10, color: colors.brandTertiary },
 });

@@ -4,14 +4,15 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { BarChart } from "react-native-gifted-charts";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as Haptics from "expo-haptics";
 
-import { api, csvUrl, API_KEY_HEADERS } from "@/src/api";
+import { api, csvUrl, xlsxUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Summary } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
-import { formatMoney, MONTH_ID } from "@/src/lib";
+import { formatMoney, formatDate, todayISO, MONTH_ID } from "@/src/lib";
 import { useCategories } from "@/src/categories";
 import { useToast } from "@/src/components/Toast";
 
@@ -20,7 +21,14 @@ const PERIODS = [
   { key: "month", label: "Bulan" },
   { key: "quarter", label: "Kuartal" },
   { key: "year", label: "Tahun" },
+  { key: "custom", label: "Custom" },
 ];
+
+function todayMinus(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export default function Reports() {
   const insets = useSafeAreaInsets();
@@ -32,15 +40,26 @@ export default function Reports() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string>(todayMinus(30));
+  const [dateTo, setDateTo] = useState<string>(todayISO());
+  const [pickerFor, setPickerFor] = useState<null | "from" | "to">(null);
 
-  const load = useCallback(async (p: string) => {
+  const load = useCallback(async (p: string, from?: string, to?: string) => {
     setLoading(true);
-    try { setSummary(await api.summary(p)); }
+    try { setSummary(await api.summary(p, p === "custom" ? from : undefined, p === "custom" ? to : undefined)); }
     catch { setSummary(null); }
     finally { setLoading(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(period); }, [period, load]));
+  useFocusEffect(useCallback(() => { load(period, dateFrom, dateTo); }, [period, dateFrom, dateTo, load]));
+
+  const onDateChange = (which: "from" | "to") => (event: DateTimePickerEvent, selected?: Date) => {
+    setPickerFor(null);
+    if (event.type === "dismissed" || !selected) return;
+    const iso = `${selected.getFullYear()}-${String(selected.getMonth() + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`;
+    if (which === "from") setDateFrom(iso); else setDateTo(iso);
+  };
 
   const onExport = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -57,6 +76,21 @@ export default function Reports() {
     finally { setExporting(false); }
   };
 
+  const onExportXlsx = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const url = xlsxUrl();
+    if (Platform.OS === "web") { window.open(url, "_blank"); return; }
+    setExportingXlsx(true);
+    try {
+      const target = FileSystem.cacheDirectory + `pengeluaran_${Date.now()}.xlsx`;
+      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", dialogTitle: "Ekspor Pengeluaran (Excel)" });
+      } else { toast("Excel tersimpan di perangkat", "success"); }
+    } catch { toast("Gagal ekspor. Coba lagi.", "error"); }
+    finally { setExportingXlsx(false); }
+  };
+
   const maxTrend = Math.max(1, ...(summary?.trend?.map((t) => t.amount) ?? [1]));
   const barData = (summary?.trend ?? []).map((t) => ({
     value: t.amount,
@@ -70,7 +104,7 @@ export default function Reports() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <Text style={styles.title}>Laporan</Text>
-        <View style={styles.segment}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segment}>
           {PERIODS.map((p) => {
             const active = period === p.key;
             return (
@@ -79,8 +113,32 @@ export default function Reports() {
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
+
+        {period === "custom" && (
+          <View style={styles.dateRangeRow}>
+            <Pressable testID="date-from" onPress={() => setPickerFor("from")} style={styles.dateChip}>
+              <Ionicons name="calendar-outline" size={14} color={colors.onSurface} />
+              <Text style={styles.dateChipText}>{formatDate(dateFrom)}</Text>
+            </Pressable>
+            <Text style={styles.dateRangeSep}>—</Text>
+            <Pressable testID="date-to" onPress={() => setPickerFor("to")} style={styles.dateChip}>
+              <Ionicons name="calendar-outline" size={14} color={colors.onSurface} />
+              <Text style={styles.dateChipText}>{formatDate(dateTo)}</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
+
+      {pickerFor && (
+        <DateTimePicker
+          value={new Date(`${pickerFor === "from" ? dateFrom : dateTo}T00:00:00`)}
+          mode="date"
+          display={Platform.OS === "ios" ? "inline" : "calendar"}
+          maximumDate={new Date()}
+          onChange={onDateChange(pickerFor)}
+        />
+      )}
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator color={colors.brand} /></View>
@@ -164,11 +222,19 @@ export default function Reports() {
       )}
 
       <View style={[styles.exportBar, { paddingBottom: spacing.md }]}>
-        <Pressable testID="export-csv" onPress={onExport} disabled={exporting} style={styles.exportBtn}>
+        <Pressable testID="export-csv" onPress={onExport} disabled={exporting} style={[styles.exportBtn, { flex: 1 }]}>
           {exporting ? <ActivityIndicator color={colors.onSurfaceInverse} /> : (
             <>
               <Ionicons name="download-outline" size={18} color={colors.onSurfaceInverse} />
-              <Text style={styles.exportText}>Ekspor CSV</Text>
+              <Text style={styles.exportText}>CSV</Text>
+            </>
+          )}
+        </Pressable>
+        <Pressable testID="export-xlsx" onPress={onExportXlsx} disabled={exportingXlsx} style={[styles.exportBtn, styles.exportBtnXlsx, { flex: 1 }]}>
+          {exportingXlsx ? <ActivityIndicator color={colors.brand} /> : (
+            <>
+              <Ionicons name="grid-outline" size={18} color={colors.brand} />
+              <Text style={[styles.exportText, { color: colors.brand }]}>Excel</Text>
             </>
           )}
         </Pressable>
@@ -181,11 +247,15 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
   header: { backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { fontFamily: fonts.bold, fontSize: type["2xl"], color: colors.onSurface },
-  segment: { flexDirection: "row", backgroundColor: colors.surfaceTertiary, borderRadius: radius.md, padding: 3, marginTop: spacing.md },
-  segItem: { flex: 1, alignItems: "center", paddingVertical: spacing.sm, borderRadius: radius.sm },
+  segment: { flexDirection: "row", gap: spacing.sm, backgroundColor: colors.surfaceTertiary, borderRadius: radius.md, padding: 3, marginTop: spacing.md },
+  segItem: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.sm },
   segItemActive: { backgroundColor: colors.surfaceSecondary, ...shadow.card },
   segText: { fontFamily: fonts.medium, fontSize: type.base, color: colors.muted },
   segTextActive: { color: colors.onSurface, fontFamily: fonts.semibold },
+  dateRangeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.md },
+  dateChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.surfaceTertiary, borderRadius: radius.sm, paddingVertical: spacing.sm },
+  dateChipText: { fontFamily: fonts.medium, fontSize: type.sm, color: colors.onSurface },
+  dateRangeSep: { color: colors.muted, fontFamily: fonts.medium },
   loader: { paddingVertical: spacing.xxxl },
   empty: { alignItems: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.xxxl, gap: spacing.sm },
   emptyTitle: { fontFamily: fonts.bold, fontSize: type.xl, color: colors.onSurface, marginTop: spacing.sm },
@@ -208,7 +278,8 @@ const styles = StyleSheet.create({
   projIcon: { width: 32, height: 32, borderRadius: radius.sm, backgroundColor: colors.brandTertiary + "18", alignItems: "center", justifyContent: "center" },
   track: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceTertiary, overflow: "hidden" },
   fill: { height: 6, borderRadius: 3 },
-  exportBar: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+  exportBar: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   exportBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brand, height: 52, borderRadius: radius.md },
+  exportBtnXlsx: { backgroundColor: colors.brand + "18" },
   exportText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurfaceInverse },
 });

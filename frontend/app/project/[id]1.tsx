@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,16 +7,13 @@ import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-import { api, projectPdfUrl, invoicePdfUrl, API_KEY_HEADERS } from "@/src/api";
+import { api, projectPdfUrl, API_KEY_HEADERS } from "@/src/api";
 import type { Project, WorkOrder } from "@/src/types";
 import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { formatMoney } from "@/src/lib";
 import InputModal from "@/src/components/InputModal";
 import ConfirmModal from "@/src/components/ConfirmModal";
-import WorkOrderPickerModal from "@/src/components/WorkOrderPickerModal";
 import { useToast } from "@/src/components/Toast";
-
-const UNASSIGNED_KEY = "__unassigned__";
 
 export default function ProjectDetail() {
   const router = useRouter();
@@ -26,23 +23,17 @@ export default function ProjectDetail() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [subProjects, setSubProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
-  const [invoicing, setInvoicing] = useState(false);
   const [addWO, setAddWO] = useState(false);
-  const [addSub, setAddSub] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [p, wos, subs] = await Promise.all([api.getProject(id!), api.workOrders(id!), api.subProjects(id!)]);
+      const [p, wos] = await Promise.all([api.getProject(id!), api.workOrders(id!)]);
       setProject(p);
       setWorkOrders(wos);
-      setSubProjects(subs);
     } catch { toast("Gagal memuat proyek", "error"); }
     finally { setLoading(false); }
   }, [id]);
@@ -51,21 +42,9 @@ export default function ProjectDetail() {
 
   const total = workOrders.reduce((s, w) => s + (w.total || 0), 0);
 
-  const pickerOptions = useMemo(
-    () => [
-      ...workOrders.map((w) => ({ id: w.id, label: w.name, sub: `${w.expense_count ?? 0} transaksi · ${formatMoney(w.total ?? 0)}` })),
-      { id: UNASSIGNED_KEY, label: "Tanpa Work Order", sub: "Pengeluaran yang belum diberi WO" },
-    ],
-    [workOrders],
-  );
-
   const createWO = async (name: string) => {
     try { await api.createWorkOrder(id!, name); Haptics.selectionAsync(); setAddWO(false); load(); }
     catch { toast("Gagal membuat work order", "error"); }
-  };
-  const createSubProject = async (name: string) => {
-    try { await api.createProject(name, undefined, id); Haptics.selectionAsync(); setAddSub(false); load(); }
-    catch { toast("Gagal membuat sub-proyek", "error"); }
   };
   const rename = async (name: string) => {
     try { await api.updateProject(id!, { name }); setRenaming(false); load(); }
@@ -80,26 +59,9 @@ export default function ProjectDetail() {
     } catch { toast("Gagal menghapus", "error"); }
   };
 
-  const togglePaid = async () => {
-    if (!project) return;
-    const next = !project.is_paid;
-    setProject({ ...project, is_paid: next });
-    try {
-      await api.updateProject(id!, { is_paid: next });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      toast(next ? "Proyek ditandai lunas" : "Ditandai belum dibayar", "success");
-      load();
-    } catch (e: any) {
-      setProject({ ...project, is_paid: !next });
-      toast(e?.message || "Gagal mengubah status pembayaran", "error");
-    }
-  };
-
-  const exportPdf = async (selectedIds: string[]) => {
+  const exportPdf = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPickerOpen(false);
-    const qs = `?work_order_ids=${encodeURIComponent(selectedIds.join(","))}`;
-    const url = projectPdfUrl(id!) + qs;
+    const url = projectPdfUrl(id!);
     if (Platform.OS === "web") { window.open(url, "_blank"); return; }
     setExporting(true);
     try {
@@ -110,24 +72,6 @@ export default function ProjectDetail() {
       } else { toast("PDF tersimpan di perangkat", "success"); }
     } catch { toast("Gagal ekspor PDF", "error"); }
     finally { setExporting(false); }
-  };
-
-  const exportInvoice = async (selectedIds: string[]) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setInvoicePickerOpen(false);
-    const qs = `?work_order_ids=${encodeURIComponent(selectedIds.join(","))}`;
-    const url = invoicePdfUrl(id!) + qs;
-    if (Platform.OS === "web") { window.open(url, "_blank"); return; }
-    setInvoicing(true);
-    try {
-      const target = FileSystem.cacheDirectory + `tagihan_${Date.now()}.pdf`;
-      const { uri } = await FileSystem.downloadAsync(url, target, { headers: API_KEY_HEADERS });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Tagihan ke Finance" });
-      } else { toast("PDF tersimpan di perangkat", "success"); }
-    } catch (e: any) {
-      toast(e?.message || "Gagal buat tagihan", "error");
-    } finally { setInvoicing(false); }
   };
 
   if (loading || !project) {
@@ -159,48 +103,6 @@ export default function ProjectDetail() {
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(total)}</Text>
         </View>
 
-        <Pressable testID="project-toggle-paid" onPress={togglePaid} style={[styles.paidBadge, project.is_paid ? styles.paidBadgeOn : styles.paidBadgeOff]}>
-          <Ionicons name={project.is_paid ? "checkmark-circle" : "time-outline"} size={18} color={project.is_paid ? colors.success : colors.warning} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.paidBadgeTitle, { color: project.is_paid ? colors.success : colors.warning }]}>
-              {project.is_paid ? "Sudah Dibayar" : "Belum Dibayar"}
-            </Text>
-            <Text style={styles.paidBadgeSub}>
-              {project.is_paid
-                ? "Pengeluaran langsung di proyek ini terkunci · ketuk untuk batalkan"
-                : "Untuk pengeluaran langsung di proyek ini (bukan lewat WO) · ketuk untuk tandai lunas"}
-            </Text>
-          </View>
-        </Pressable>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Sub-Proyek</Text>
-          <Pressable testID="add-sub-project" onPress={() => setAddSub(true)} style={styles.addWoBtn}>
-            <Ionicons name="add" size={16} color={colors.onSurfaceInverse} />
-            <Text style={styles.addWoText}>Sub-Proyek</Text>
-          </Pressable>
-        </View>
-
-        {subProjects.length > 0 && (
-          <View style={[styles.woList, { marginBottom: spacing.lg }]}>
-            {subProjects.map((sp) => (
-              <Pressable key={sp.id} testID={`sub-project-card-${sp.id}`} onPress={() => router.push(`/project/${sp.id}`)} style={styles.woCard}>
-                <View style={[styles.woIcon, { backgroundColor: colors.brand + "18" }]}>
-                  <Ionicons name="folder" size={18} color={colors.brand} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.woName} numberOfLines={1}>{sp.name}</Text>
-                  <Text style={styles.woMeta}>
-                    {sp.work_order_count ?? 0} WO{(sp.sub_project_count ?? 0) > 0 ? ` · ${sp.sub_project_count} sub-proyek` : ""}
-                  </Text>
-                </View>
-                <Text style={styles.woTotal}>{formatMoney(sp.total ?? 0)}</Text>
-                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-              </Pressable>
-            ))}
-          </View>
-        )}
-
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Work Order</Text>
           <Pressable testID="add-wo" onPress={() => setAddWO(true)} style={styles.addWoBtn}>
@@ -217,20 +119,10 @@ export default function ProjectDetail() {
         ) : (
           <View style={styles.woList}>
             {workOrders.map((w) => (
-              <Pressable key={w.id} testID={`wo-card-${w.id}`} onPress={() => router.push(`/workorder/${w.id}`)} style={[styles.woCard, w.is_paid && styles.woCardPaid]}>
-                <View style={[styles.woIcon, w.is_paid && styles.woIconPaid]}>
-                  <Ionicons name="construct" size={18} color={w.is_paid ? colors.success : colors.brandTertiary} />
-                </View>
+              <Pressable key={w.id} testID={`wo-card-${w.id}`} onPress={() => router.push(`/workorder/${w.id}`)} style={styles.woCard}>
+                <View style={styles.woIcon}><Ionicons name="construct" size={18} color={colors.brandTertiary} /></View>
                 <View style={{ flex: 1 }}>
-                  <View style={styles.woNameRow}>
-                    <Text style={styles.woName} numberOfLines={1}>{w.name}</Text>
-                    {w.is_paid && (
-                      <View style={styles.paidChip}>
-                        <Ionicons name="checkmark-circle" size={11} color={colors.success} />
-                        <Text style={styles.paidChipText}>Lunas</Text>
-                      </View>
-                    )}
-                  </View>
+                  <Text style={styles.woName} numberOfLines={1}>{w.name}</Text>
                   <Text style={styles.woMeta}>{w.expense_count ?? 0} transaksi</Text>
                 </View>
                 <Text style={styles.woTotal}>{formatMoney(w.total ?? 0)}</Text>
@@ -242,41 +134,19 @@ export default function ProjectDetail() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Pressable testID="export-pdf" onPress={() => setPickerOpen(true)} disabled={exporting} style={[styles.pdfBtn, { flex: 1 }]}>
+        <Pressable testID="export-pdf" onPress={exportPdf} disabled={exporting} style={styles.pdfBtn}>
           {exporting ? <ActivityIndicator color={colors.onSurfaceInverse} /> : (
             <>
               <Ionicons name="document-text-outline" size={18} color={colors.onSurfaceInverse} />
-              <Text style={styles.pdfText}>Laporan PDF</Text>
-            </>
-          )}
-        </Pressable>
-        <Pressable testID="export-invoice" onPress={() => setInvoicePickerOpen(true)} disabled={invoicing} style={[styles.pdfBtn, styles.invoiceBtn, { flex: 1 }]}>
-          {invoicing ? <ActivityIndicator color={colors.brand} /> : (
-            <>
-              <Ionicons name="cash-outline" size={18} color={colors.brand} />
-              <Text style={[styles.pdfText, { color: colors.brand }]}>Tagihan Finance</Text>
+              <Text style={styles.pdfText}>Ekspor Laporan PDF</Text>
             </>
           )}
         </Pressable>
       </View>
 
-      <WorkOrderPickerModal
-        visible={pickerOpen}
-        options={pickerOptions}
-        onClose={() => setPickerOpen(false)}
-        onConfirm={exportPdf}
-      />
-      <WorkOrderPickerModal
-        visible={invoicePickerOpen}
-        options={pickerOptions}
-        onClose={() => setInvoicePickerOpen(false)}
-        onConfirm={exportInvoice}
-      />
-
       <InputModal visible={addWO} title="Work Order Baru" placeholder="mis. WO-001 Instalasi" confirmLabel="Buat" onClose={() => setAddWO(false)} onSubmit={createWO} />
-      <InputModal visible={addSub} title="Sub-Proyek Baru" placeholder="mis. Site Jakarta" confirmLabel="Buat" onClose={() => setAddSub(false)} onSubmit={createSubProject} />
       <InputModal visible={renaming} title="Ubah Nama Proyek" placeholder="Nama proyek" initialValue={project.name} confirmLabel="Simpan" onClose={() => setRenaming(false)} onSubmit={rename} />
-      <ConfirmModal visible={confirmDel} title="Hapus proyek?" message="Semua work order akan dihapus. Pengeluaran akan dilepas dari proyek ini. Sub-proyek di dalamnya tidak ikut terhapus, cuma naik jadi proyek tersendiri." onClose={() => setConfirmDel(false)} onConfirm={remove} />
+      <ConfirmModal visible={confirmDel} title="Hapus proyek?" message="Semua work order akan dihapus. Pengeluaran akan dilepas dari proyek ini." onClose={() => setConfirmDel(false)} onConfirm={remove} />
     </View>
   );
 }
@@ -300,22 +170,11 @@ const styles = StyleSheet.create({
   emptyWoText: { fontFamily: fonts.regular, fontSize: type.base, color: colors.muted, textAlign: "center", lineHeight: 22 },
   woList: { gap: spacing.md },
   woCard: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.lg },
-  woCardPaid: { borderColor: colors.success + "55", backgroundColor: colors.success + "0D" },
   woIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.brandTertiary + "18", alignItems: "center", justifyContent: "center" },
-  woIconPaid: { backgroundColor: colors.success + "1E" },
-  woNameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  paidChip: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.success + "1E", paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
-  paidChipText: { fontFamily: fonts.semibold, fontSize: 10, color: colors.success },
-  woName: { flexShrink: 1, fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurface },
+  woName: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurface },
   woMeta: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   woTotal: { fontFamily: fonts.display, fontSize: type.base, color: colors.onSurface },
-  bottomBar: { flexDirection: "row", gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+  bottomBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   pdfBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brand, height: 52, borderRadius: radius.md },
-  invoiceBtn: { backgroundColor: colors.brand + "18" },
   pdfText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurfaceInverse },
-  paidBadge: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.md },
-  paidBadgeOn: { borderColor: colors.success + "55", backgroundColor: colors.success + "14" },
-  paidBadgeOff: { borderColor: colors.warning + "55", backgroundColor: colors.warning + "14" },
-  paidBadgeTitle: { fontFamily: fonts.semibold, fontSize: type.base },
-  paidBadgeSub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
 });

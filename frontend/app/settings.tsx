@@ -21,7 +21,7 @@ export default function Settings() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { refresh: refreshCategories } = useCategories();
-  const { enabled, timeoutMinutes, setupPin, disableLock, setTimeoutMinutes } = useAppLock();
+  const { enabled, timeoutMinutes, setupPin, disableLock, setTimeoutMinutes, biometricAvailable, biometricEnabled, setBiometricEnabled } = useAppLock();
 
   const [pinStep, setPinStep] = useState<"none" | "new" | "confirm">("none");
   const [firstPin, setFirstPin] = useState("");
@@ -149,6 +149,17 @@ export default function Settings() {
                 <Text style={styles.rowText}>Ubah PIN</Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.muted} />
               </Pressable>
+
+              {biometricAvailable && (
+                <>
+                  <View style={styles.divider} />
+                  <View style={styles.cardRow}>
+                    <Ionicons name="finger-print-outline" size={20} color={colors.onSurface} />
+                    <Text style={styles.rowText}>Buka dengan Sidik Jari / Wajah</Text>
+                    <Switch testID="settings-biometric-toggle" value={biometricEnabled} onValueChange={setBiometricEnabled} />
+                  </View>
+                </>
+              )}
 
               <View style={styles.divider} />
               <Text style={styles.subLabel}>Kunci otomatis setelah</Text>

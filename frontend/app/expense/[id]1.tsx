@@ -69,7 +69,7 @@ export default function ExpenseDetail() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       toast("Perubahan disimpan", "success");
       router.back();
-    } catch (e: any) { toast(e?.message || "Gagal menyimpan", "error"); }
+    } catch { toast("Gagal menyimpan", "error"); }
     finally { setSaving(false); }
   };
 
@@ -80,7 +80,7 @@ export default function ExpenseDetail() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       toast("Pengeluaran dihapus", "success");
       router.back();
-    } catch (e: any) { toast(e?.message || "Gagal menghapus", "error"); }
+    } catch { toast("Gagal menghapus", "error"); }
   };
 
   if (loading || !form || !expense) {
@@ -89,7 +89,6 @@ export default function ExpenseDetail() {
 
   const meta = metaFor(expense.category);
   const hasReceipt = !!expense.receipt_path;
-  const locked = !!expense.locked;
 
   return (
     <View style={styles.screen}>
@@ -106,35 +105,23 @@ export default function ExpenseDetail() {
           <Pressable testID="detail-back" onPress={() => router.back()} style={styles.roundBtn}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
-          {!locked && (
-            <Pressable testID="detail-delete" onPress={() => setConfirmDelete(true)} style={styles.roundBtn}>
-              <Ionicons name="trash-outline" size={20} color="#fff" />
-            </Pressable>
-          )}
+          <Pressable testID="detail-delete" onPress={() => setConfirmDelete(true)} style={styles.roundBtn}>
+            <Ionicons name="trash-outline" size={20} color="#fff" />
+          </Pressable>
         </View>
       </View>
 
       <KeyboardAwareScrollView bottomOffset={90} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl }} showsVerticalScrollIndicator={false} style={styles.sheet}>
-        {locked && (
-          <View style={styles.lockedBanner}>
-            <Ionicons name="lock-closed" size={18} color={colors.success} />
-            <Text style={styles.lockedBannerText}>Sudah Dibayar — Terkunci, tidak bisa diedit/dihapus</Text>
-          </View>
-        )}
-        <View pointerEvents={locked ? "none" : "auto"} style={locked ? { opacity: 0.55 } : undefined}>
-          <ExpenseForm value={form} onChange={patch} />
-        </View>
+        <ExpenseForm value={form} onChange={patch} />
       </KeyboardAwareScrollView>
 
-      {!locked && (
-        <KeyboardStickyView>
-          <View style={[styles.saveBar, { paddingBottom: insets.bottom + spacing.md }]}>
-            <Pressable testID="save-changes" onPress={save} disabled={saving} style={styles.saveBtn}>
-              {saving ? <ActivityIndicator color={colors.onSurfaceInverse} /> : <Text style={styles.saveText}>Simpan Perubahan</Text>}
-            </Pressable>
-          </View>
-        </KeyboardStickyView>
-      )}
+      <KeyboardStickyView>
+        <View style={[styles.saveBar, { paddingBottom: insets.bottom + spacing.md }]}>
+          <Pressable testID="save-changes" onPress={save} disabled={saving} style={styles.saveBtn}>
+            {saving ? <ActivityIndicator color={colors.onSurfaceInverse} /> : <Text style={styles.saveText}>Simpan Perubahan</Text>}
+          </Pressable>
+        </View>
+      </KeyboardStickyView>
 
       <ConfirmModal
         visible={confirmDelete}
@@ -157,8 +144,6 @@ const styles = StyleSheet.create({
   heroTop: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   roundBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
   sheet: { flex: 1, backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, marginTop: -spacing.lg },
-  lockedBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.success + "14", borderWidth: 1, borderColor: colors.success + "40", borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.lg },
-  lockedBannerText: { flex: 1, fontFamily: fonts.semibold, fontSize: type.sm, color: colors.success },
   saveBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
   saveBtn: { height: 52, borderRadius: radius.md, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center", ...shadow.card },
   saveText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurfaceInverse },

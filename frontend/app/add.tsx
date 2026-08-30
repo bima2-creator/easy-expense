@@ -47,7 +47,7 @@ export default function AddExpense() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       toast("Pengeluaran ditambahkan", "success");
       router.back();
-    } catch { toast("Gagal menambah pengeluaran", "error"); }
+    } catch (e: any) { toast(e?.message || "Gagal menambah pengeluaran", "error"); }
     finally { setSaving(false); }
   };
 

@@ -14,6 +14,8 @@ export type Project = {
   client?: string;
   color?: string;
   parent_id?: string | null;
+  is_paid: boolean;
+  paid_at: string | null;
   created_at: string;
   work_order_count?: number;
   sub_project_count?: number;
@@ -43,6 +45,7 @@ export type Expense = {
   notes?: string;
   receipt_path?: string | null;
   is_billable: boolean;
+  locked?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -55,10 +58,19 @@ export type Extracted = {
   notes: string;
 };
 
+export type DuplicateInfo = {
+  expense_id: string;
+  vendor: string;
+  date: string;
+  amount: number;
+  category: string;
+};
+
 export type ScanResult = {
   receipt_path: string;
   extracted: Extracted;
   extraction_failed: boolean;
+  duplicate: DuplicateInfo | null;
 };
 
 export type Summary = {

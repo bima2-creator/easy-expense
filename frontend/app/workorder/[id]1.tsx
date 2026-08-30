@@ -127,23 +127,16 @@ export default function WorkOrderDetail() {
           </View>
         </Pressable>
 
-        {wo.is_paid ? (
-          <View style={styles.lockedHint}>
-            <Ionicons name="lock-closed-outline" size={16} color={colors.muted} />
-            <Text style={styles.lockedHintText}>Sudah lunas — tidak bisa menambah pengeluaran baru di WO ini</Text>
-          </View>
-        ) : (
-          <View style={styles.quickRow}>
-            <Pressable testID="wo-scan" onPress={goScan} style={[styles.quickBtn, styles.quickPrimary]}>
-              <Ionicons name="scan" size={18} color={colors.onSurfaceInverse} />
-              <Text style={styles.quickPrimaryText}>Scan Struk</Text>
-            </Pressable>
-            <Pressable testID="wo-add" onPress={goAdd} style={[styles.quickBtn, styles.quickSecondary]}>
-              <Ionicons name="create-outline" size={18} color={colors.onSurface} />
-              <Text style={styles.quickSecondaryText}>Manual</Text>
-            </Pressable>
-          </View>
-        )}
+        <View style={styles.quickRow}>
+          <Pressable testID="wo-scan" onPress={goScan} style={[styles.quickBtn, styles.quickPrimary]}>
+            <Ionicons name="scan" size={18} color={colors.onSurfaceInverse} />
+            <Text style={styles.quickPrimaryText}>Scan Struk</Text>
+          </Pressable>
+          <Pressable testID="wo-add" onPress={goAdd} style={[styles.quickBtn, styles.quickSecondary]}>
+            <Ionicons name="create-outline" size={18} color={colors.onSurface} />
+            <Text style={styles.quickSecondaryText}>Manual</Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.sectionTitle}>Pengeluaran</Text>
         {expenses.length === 0 ? (
@@ -196,8 +189,6 @@ const styles = StyleSheet.create({
   paidBadgeTitle: { fontFamily: fonts.semibold, fontSize: type.base },
   paidBadgeSub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
   quickRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
-  lockedHint: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.lg, padding: spacing.md, backgroundColor: colors.surfaceTertiary, borderRadius: radius.md },
-  lockedHintText: { flex: 1, fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted },
   quickBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, height: 50, borderRadius: radius.md },
   quickPrimary: { backgroundColor: colors.brand },
   quickPrimaryText: { fontFamily: fonts.semibold, fontSize: type.base, color: colors.onSurfaceInverse },

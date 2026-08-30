@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,9 +11,21 @@ const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "back"];
 
 export default function LockScreen() {
   const insets = useSafeAreaInsets();
-  const { verifyPin, unlock } = useAppLock();
+  const { verifyPin, unlock, biometricAvailable, biometricEnabled, tryBiometricUnlock } = useAppLock();
   const [digits, setDigits] = useState("");
   const [error, setError] = useState(false);
+  const [biometricTrying, setBiometricTrying] = useState(false);
+
+  const useBiometric = biometricAvailable && biometricEnabled;
+
+  useEffect(() => {
+    if (useBiometric) {
+      setBiometricTrying(true);
+      tryBiometricUnlock().finally(() => setBiometricTrying(false));
+    }
+    // sengaja cuma jalan sekali saat layar lock muncul, bukan tiap re-render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onKey = useCallback(
     async (key: string) => {
@@ -58,6 +70,18 @@ export default function LockScreen() {
         ))}
       </View>
 
+      {useBiometric && (
+        <Pressable
+          testID="lock-biometric-retry"
+          onPress={() => { setBiometricTrying(true); tryBiometricUnlock().finally(() => setBiometricTrying(false)); }}
+          disabled={biometricTrying}
+          style={styles.bioBtn}
+        >
+          <Ionicons name="finger-print" size={20} color={colors.onSurfaceInverse} />
+          <Text style={styles.bioBtnText}>{biometricTrying ? "Memeriksa..." : "Coba lagi dengan sidik jari"}</Text>
+        </Pressable>
+      )}
+
       <View style={styles.keypad}>
         {KEYS.map((k, i) => (
           <Pressable
@@ -85,6 +109,8 @@ const styles = StyleSheet.create({
   title: { fontFamily: fonts.bold, fontSize: type.xl, color: colors.onSurfaceInverse },
   subtitle: { fontFamily: fonts.regular, fontSize: type.base, color: "#8A8A8D", marginTop: spacing.xs },
   dotsRow: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.xxxl, marginBottom: spacing.xxxl },
+  bioBtn: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.xl, paddingVertical: spacing.sm, paddingHorizontal: spacing.lg, borderRadius: radius.pill, backgroundColor: "#ffffff1a" },
+  bioBtnText: { fontFamily: fonts.medium, fontSize: type.sm, color: colors.onSurfaceInverse },
   dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: "#8A8A8D" },
   dotFilled: { backgroundColor: colors.onSurfaceInverse, borderColor: colors.onSurfaceInverse },
   dotError: { borderColor: colors.error, backgroundColor: colors.error },
