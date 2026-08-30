@@ -533,6 +533,25 @@ async def delete_category(category_id: str):
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+async def _project_rollup(project_id: str) -> dict:
+    """Hitung total & jumlah transaksi milik proyek ini SAMPAI KE SEMUA SUB-PROYEK
+    di bawahnya (rekursif). Pengeluaran yang menempel ke work order tetap ikut
+    terhitung di sini karena field project_id-nya tetap menunjuk ke proyek/sub-
+    proyek induk WO tersebut, bukan cuma pengeluaran langsung tanpa WO."""
+    agg = await db.expenses.aggregate([
+        {"$match": {"project_id": project_id}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]).to_list(1)
+    total = agg[0]["total"] if agg else 0
+    count = agg[0]["count"] if agg else 0
+    children = await db.projects.find({"parent_id": project_id}).to_list(1000)
+    for c in children:
+        child = await _project_rollup(c["id"])
+        total += child["total"]
+        count += child["count"]
+    return {"total": round(total, 2), "count": count}
+
+
 @api_router.get("/projects")
 async def list_projects(parent_id: Optional[str] = Query(None), all: bool = Query(False)):
     # Default (tanpa parent_id): cuma project level teratas (parent_id kosong) —
@@ -553,14 +572,11 @@ async def list_projects(parent_id: Optional[str] = Query(None), all: bool = Quer
         p = Project(**d).dict()
         wo_count = await db.work_orders.count_documents({"project_id": p["id"]})
         sub_count = await db.projects.count_documents({"parent_id": p["id"]})
-        agg = await db.expenses.aggregate([
-            {"$match": {"project_id": p["id"]}},
-            {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
-        ]).to_list(1)
+        rollup = await _project_rollup(p["id"])
         p["work_order_count"] = wo_count
         p["sub_project_count"] = sub_count
-        p["total"] = round(agg[0]["total"], 2) if agg else 0
-        p["expense_count"] = agg[0]["count"] if agg else 0
+        p["total"] = rollup["total"]
+        p["expense_count"] = rollup["count"]
         result.append(p)
     return result
 
@@ -570,7 +586,15 @@ async def get_project(project_id: str):
     doc = await db.projects.find_one({"id": project_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
-    return Project(**doc)
+    p = Project(**doc).dict()
+    wo_count = await db.work_orders.count_documents({"project_id": project_id})
+    sub_count = await db.projects.count_documents({"parent_id": project_id})
+    rollup = await _project_rollup(project_id)
+    p["work_order_count"] = wo_count
+    p["sub_project_count"] = sub_count
+    p["total"] = rollup["total"]
+    p["expense_count"] = rollup["count"]
+    return p
 
 
 @api_router.post("/projects", response_model=Project)

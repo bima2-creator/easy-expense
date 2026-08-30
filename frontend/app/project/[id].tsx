@@ -47,7 +47,7 @@ export default function ProjectDetail() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const total = workOrders.reduce((s, w) => s + (w.total || 0), 0);
+  const total = project?.total ?? 0;
 
   const pickerOptions = useMemo(
     () => [
