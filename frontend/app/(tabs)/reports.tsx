@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Platform, useWindowDimensions } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { BarChart } from "react-native-gifted-charts";
@@ -24,6 +24,7 @@ const PERIODS = [
 
 export default function Reports() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const toast = useToast();
   const { metaFor } = useCategories();
   const { width } = useWindowDimensions();
@@ -61,6 +62,7 @@ export default function Reports() {
     value: t.amount,
     label: MONTH_ID[t.label] || t.label,
     frontColor: colors.brandTertiary,
+    onPress: () => toast(`${MONTH_ID[t.label] || t.label}: ${formatMoney(t.amount)}`, "info"),
   }));
   const maxCat = Math.max(1, ...(summary?.by_category?.map((c) => c.amount) ?? [1]));
 
@@ -90,11 +92,11 @@ export default function Reports() {
         </View>
       ) : (
         <ScrollView testID="reports-scroll" contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-          <View style={styles.totalCard}>
+          <Pressable testID="reports-total" onPress={() => router.push("/expenses")} style={styles.totalCard}>
             <Text style={styles.totalLabel}>TOTAL PENGELUARAN</Text>
             <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(summary.total)}</Text>
             <Text style={styles.totalMeta}>{summary.count} transaksi</Text>
-          </View>
+          </Pressable>
 
           <Text style={styles.sectionTitle}>Tren 6 Bulan</Text>
           <View style={styles.chartCard}>
@@ -119,7 +121,12 @@ export default function Reports() {
             {summary.by_category.map((c, i) => {
               const meta = metaFor(c.category);
               return (
-                <View key={c.category} style={[styles.catItem, i > 0 && styles.catItemBorder]}>
+                <Pressable
+                  key={c.category}
+                  testID={`report-category-${c.category}`}
+                  onPress={() => router.push(`/expenses?category=${encodeURIComponent(c.category)}`)}
+                  style={[styles.catItem, i > 0 && styles.catItemBorder]}
+                >
                   <View style={styles.catTop}>
                     <View style={styles.catLeft}>
                       <View style={[styles.catDot, { backgroundColor: meta.color }]} />
@@ -128,7 +135,7 @@ export default function Reports() {
                     <Text style={styles.catAmount} numberOfLines={1}>{formatMoney(c.amount)}</Text>
                   </View>
                   <View style={styles.track}><View style={[styles.fill, { width: `${(c.amount / maxCat) * 100}%`, backgroundColor: meta.color }]} /></View>
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -138,11 +145,17 @@ export default function Reports() {
               <Text style={styles.sectionTitle}>Per Proyek</Text>
               <View style={styles.catCard}>
                 {summary.by_project.map((p, i) => (
-                  <View key={p.name + i} style={[styles.projItem, i > 0 && styles.catItemBorder]}>
+                  <Pressable
+                    key={p.id}
+                    testID={`report-project-${p.id}`}
+                    onPress={() => router.push(`/project/${p.id}`)}
+                    style={[styles.projItem, i > 0 && styles.catItemBorder]}
+                  >
                     <View style={styles.projIcon}><Ionicons name="folder-outline" size={16} color={colors.brandTertiary} /></View>
                     <Text style={styles.catName} numberOfLines={1}>{p.name}</Text>
                     <Text style={styles.catAmount} numberOfLines={1}>{formatMoney(p.amount)}</Text>
-                  </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.muted} />
+                  </Pressable>
                 ))}
               </View>
             </>

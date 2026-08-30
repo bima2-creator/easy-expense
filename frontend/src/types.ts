@@ -66,6 +66,6 @@ export type Summary = {
   total: number;
   count: number;
   by_category: { category: string; amount: number }[];
-  by_project: { name: string; amount: number }[];
+  by_project: { id: string; name: string; amount: number }[];
   trend: { label: string; amount: number }[];
 };

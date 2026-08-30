@@ -66,7 +66,7 @@ export default function Home() {
         ) : (
           <>
             <Animated.View entering={FadeInDown.duration(400)} style={styles.heroWrap}>
-              <View style={styles.hero}>
+              <Pressable testID="home-hero" onPress={() => router.push("/expenses")} style={styles.hero}>
                 <Text style={styles.heroLabel}>TOTAL PENGELUARAN · BULAN INI</Text>
                 <Text style={styles.heroAmount} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(summary?.total ?? 0)}</Text>
                 <View style={styles.heroFooter}>
@@ -75,32 +75,44 @@ export default function Home() {
                     <Text style={styles.heroPillText}>{summary?.count ?? 0} transaksi</Text>
                   </View>
                   {topProj ? (
-                    <View style={styles.heroPill}>
+                    <Pressable
+                      testID="home-top-project"
+                      onPress={() => router.push(`/project/${topProj.id}`)}
+                      style={styles.heroPill}
+                    >
                       <Ionicons name="folder-outline" size={13} color={colors.onSurfaceInverse} />
                       <Text style={styles.heroPillText} numberOfLines={1}>{topProj.name}</Text>
-                    </View>
+                    </Pressable>
                   ) : null}
                 </View>
-              </View>
+              </Pressable>
             </Animated.View>
 
             <View style={styles.bento}>
-              <Animated.View entering={FadeInDown.duration(400).delay(80)} style={[styles.bentoCard, { flex: 1 }]}>
-                <View style={[styles.bentoIcon, { backgroundColor: catMeta.color + "18" }]}>
-                  <Ionicons name={topCat ? catMeta.icon : "pie-chart-outline"} size={18} color={topCat ? catMeta.color : colors.muted} />
-                </View>
-                <Text style={styles.bentoLabel}>Kategori Teratas</Text>
-                <Text style={styles.bentoValue} numberOfLines={1}>{topCat?.category ?? "—"}</Text>
-                <Text style={styles.bentoSub}>{topCat ? formatMoney(topCat.amount) : "Rp 0"}</Text>
+              <Animated.View entering={FadeInDown.duration(400).delay(80)} style={{ flex: 1 }}>
+                <Pressable
+                  testID="home-top-category"
+                  onPress={() => router.push(topCat ? `/expenses?category=${encodeURIComponent(topCat.category)}` : "/expenses")}
+                  style={styles.bentoCard}
+                >
+                  <View style={[styles.bentoIcon, { backgroundColor: catMeta.color + "18" }]}>
+                    <Ionicons name={topCat ? catMeta.icon : "pie-chart-outline"} size={18} color={topCat ? catMeta.color : colors.muted} />
+                  </View>
+                  <Text style={styles.bentoLabel}>Kategori Teratas</Text>
+                  <Text style={styles.bentoValue} numberOfLines={1}>{topCat?.category ?? "—"}</Text>
+                  <Text style={styles.bentoSub}>{topCat ? formatMoney(topCat.amount) : "Rp 0"}</Text>
+                </Pressable>
               </Animated.View>
 
-              <Animated.View entering={FadeInDown.duration(400).delay(140)} style={[styles.bentoCard, { flex: 1 }]}>
-                <View style={[styles.bentoIcon, { backgroundColor: colors.brandTertiary + "18" }]}>
-                  <Ionicons name="folder-open-outline" size={18} color={colors.brandTertiary} />
-                </View>
-                <Text style={styles.bentoLabel}>Proyek Aktif</Text>
-                <Text style={styles.bentoValue}>{summary?.by_project?.length ?? 0}</Text>
-                <Text style={styles.bentoSub}>dengan pengeluaran</Text>
+              <Animated.View entering={FadeInDown.duration(400).delay(140)} style={{ flex: 1 }}>
+                <Pressable testID="home-active-projects" onPress={() => router.push("/projects")} style={styles.bentoCard}>
+                  <View style={[styles.bentoIcon, { backgroundColor: colors.brandTertiary + "18" }]}>
+                    <Ionicons name="folder-open-outline" size={18} color={colors.brandTertiary} />
+                  </View>
+                  <Text style={styles.bentoLabel}>Proyek Aktif</Text>
+                  <Text style={styles.bentoValue}>{summary?.by_project?.length ?? 0}</Text>
+                  <Text style={styles.bentoSub}>dengan pengeluaran</Text>
+                </Pressable>
               </Animated.View>
             </View>
 

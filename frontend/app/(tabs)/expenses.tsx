@@ -1,6 +1,6 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, ScrollView, Pressable, TextInput, StyleSheet, ActivityIndicator } from "react-native";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,11 +17,12 @@ const EMPTY_IMG = "https://images.unsplash.com/photo-1585435465945-bef5a93f8849?
 export default function Expenses() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { category: paramCategory } = useLocalSearchParams<{ category?: string }>();
   const { categories } = useCategories();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [unpaidWOs, setUnpaidWOs] = useState<WorkOrder[]>([]);
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
-  const [category, setCategory] = useState("Semua");
+  const [category, setCategory] = useState(paramCategory || "Semua");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -45,6 +46,12 @@ export default function Expenses() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(category, search); loadUnpaid(); }, [category, search, load, loadUnpaid]));
+
+  // Kalau datang dari halaman lain dengan ?category=X (misal tap "Kategori Teratas"
+  // di Home), terapkan filternya walau tab Pengeluaran sudah pernah dibuka sebelumnya.
+  useEffect(() => {
+    if (paramCategory) setCategory(paramCategory);
+  }, [paramCategory]);
 
   const total = expenses.reduce((s, e) => s + (e.amount || 0), 0);
 
