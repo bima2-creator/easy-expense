@@ -820,7 +820,7 @@ async def reports_summary(period: str = Query("month")):
         if pid:
             by_proj[pid] = by_proj.get(pid, 0) + float(d.get("amount") or 0)
     by_project = sorted(
-        [{"name": projects.get(k, "Proyek"), "amount": round(v, 2)} for k, v in by_proj.items()],
+        [{"id": k, "name": projects.get(k, "Proyek"), "amount": round(v, 2)} for k, v in by_proj.items()],
         key=lambda x: x["amount"], reverse=True,
     )
 
