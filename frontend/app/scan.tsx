@@ -6,6 +6,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
+import DocumentScanner, { ResponseType } from "react-native-document-scanner-plugin";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
@@ -53,6 +54,8 @@ export default function Scan() {
 
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>("camera");
+  const [scannerFailed, setScannerFailed] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [shot, setShot] = useState<Shot | null>(null);
   const [receiptPath, setReceiptPath] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
@@ -97,6 +100,31 @@ export default function Scan() {
       setPhase("camera");
     }
   }, [categories, toast]);
+
+  // Deteksi tepi dokumen otomatis (seperti CamScanner) — pakai scanner native
+  // Android (ML Kit), tepi struk terdeteksi & di-crop sendiri, user tinggal
+  // konfirmasi. Kalau scanner native gagal/tidak tersedia di HP tertentu,
+  // otomatis jatuh ke kamera manual + crop biasa (fallback aman).
+  const scanAuto = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setScanning(true);
+    try {
+      const { scannedImages, status } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        responseType: ResponseType.ImageFilePath,
+        croppedImageQuality: 90,
+      });
+      if (status === "success" && scannedImages && scannedImages.length > 0) {
+        process(scannedImages[0], "receipt.jpg", "image/jpeg");
+      }
+      // status "cancel" -> user batal, tetap di layar ini, tidak perlu apa-apa
+    } catch (e) {
+      toast("Deteksi otomatis tidak tersedia di HP ini — pakai kamera manual", "info");
+      setScannerFailed(true);
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const capture = async () => {
     if (!cameraRef.current) return;
@@ -286,6 +314,42 @@ export default function Scan() {
     );
   }
 
+  if (!scannerFailed) {
+    return (
+      <View style={styles.black}>
+        <View style={[styles.camTop, { paddingTop: insets.top + spacing.sm }]}>
+          <Pressable testID="scan-close" onPress={() => router.back()} style={styles.roundBtn}>
+            <Ionicons name="close" size={24} color="#fff" />
+          </Pressable>
+          <View style={{ width: 44 }} />
+        </View>
+
+        <View style={styles.autoScanBody}>
+          <View style={styles.autoScanIcon}><Ionicons name="scan" size={40} color="#fff" /></View>
+          <Text style={styles.permTitle}>Scan Struk Otomatis</Text>
+          <Text style={styles.permText}>Tepi struk terdeteksi & dipotong sendiri — kamu tinggal konfirmasi atau geser dikit kalau kurang pas.</Text>
+          <Pressable testID="scan-auto" onPress={scanAuto} disabled={scanning} style={styles.permBtn}>
+            {scanning ? <ActivityIndicator color={colors.onSurface} /> : <Text style={styles.permBtnText}>Mulai Scan</Text>}
+          </Pressable>
+          <View style={styles.autoScanAlts}>
+            <Pressable testID="pick-gallery" onPress={pickImage} style={styles.permAlt}>
+              <Ionicons name="image-outline" size={18} color="#fff" />
+              <Text style={styles.permAltText}>Unggah dari galeri</Text>
+            </Pressable>
+            <Pressable testID="import-document" onPress={pickDocument} style={styles.permAlt}>
+              <Ionicons name="document-attach-outline" size={18} color="#fff" />
+              <Text style={styles.permAltText}>Impor gambar dari file</Text>
+            </Pressable>
+            <Pressable testID="use-manual-camera" onPress={() => setScannerFailed(true)} style={styles.permAlt}>
+              <Ionicons name="camera-outline" size={18} color="#fff" />
+              <Text style={styles.permAltText}>Pakai kamera manual + crop</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.black}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
@@ -294,7 +358,9 @@ export default function Scan() {
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>
         <Text style={styles.camHint}>Posisikan struk dalam bingkai</Text>
-        <View style={{ width: 44 }} />
+        <Pressable testID="back-to-auto" onPress={() => setScannerFailed(false)} style={styles.roundBtn}>
+          <Ionicons name="scan-outline" size={20} color="#fff" />
+        </Pressable>
       </View>
 
       <View style={styles.reticle} pointerEvents="none">
@@ -347,6 +413,9 @@ const styles = StyleSheet.create({
   permBtnText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurface },
   permAlt: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.xl },
   permAltText: { fontFamily: fonts.medium, fontSize: type.base, color: "#fff" },
+  autoScanBody: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, paddingBottom: spacing.xxxl },
+  autoScanIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center", marginBottom: spacing.xl },
+  autoScanAlts: { alignItems: "center", marginTop: spacing.sm },
   reviewScreen: { flex: 1, backgroundColor: colors.surface },
   reviewHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md, backgroundColor: colors.surfaceSecondary, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
