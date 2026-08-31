@@ -12,6 +12,7 @@ export default function InputModal({
   keyboardType,
   secureTextEntry,
   maxLength,
+  uppercase = false,
   onClose,
   onSubmit,
 }: {
@@ -24,6 +25,7 @@ export default function InputModal({
   keyboardType?: "default" | "numeric" | "number-pad";
   secureTextEntry?: boolean;
   maxLength?: number;
+  uppercase?: boolean;
   onClose: () => void;
   onSubmit: (value: string) => void;
 }) {
@@ -46,10 +48,11 @@ export default function InputModal({
             <TextInput
               testID="input-modal-field"
               value={value}
-              onChangeText={setValue}
+              onChangeText={(t) => setValue(uppercase ? t.toUpperCase() : t)}
               placeholder={placeholder}
               placeholderTextColor={colors.muted}
               autoFocus
+              autoCapitalize={uppercase ? "characters" : "sentences"}
               style={styles.input}
               onSubmitEditing={submit}
               returnKeyType="done"

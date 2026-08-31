@@ -533,6 +533,17 @@ async def delete_category(category_id: str):
 # ---------------------------------------------------------------------------
 # Projects
 # ---------------------------------------------------------------------------
+async def _project_subtree_ids(project_id: str) -> List[str]:
+    """Kumpulkan id proyek ini + semua sub-proyek di bawahnya, rekursif turun
+    berapa level pun. Dipakai supaya laporan PDF & pilihan WO bisa mencakup
+    seluruh hierarki, bukan cuma proyek yang dibuka user."""
+    ids = [project_id]
+    children = await db.projects.find({"parent_id": project_id}).to_list(1000)
+    for c in children:
+        ids.extend(await _project_subtree_ids(c["id"]))
+    return ids
+
+
 async def _project_rollup(project_id: str) -> dict:
     """Hitung total & jumlah transaksi milik proyek ini SAMPAI KE SEMUA SUB-PROYEK
     di bawahnya (rekursif). Pengeluaran yang menempel ke work order tetap ikut
@@ -1220,31 +1231,78 @@ def _build_expense_pdf(buf, title, subtitle_lines, groups, receipts, total_label
     doc.build(elements)
 
 
+@api_router.get("/projects/{project_id}/report-options")
+async def project_report_options(project_id: str):
+    """Daftar pilihan checklist untuk generate laporan PDF: semua work order di
+    proyek ini DAN semua sub-proyek di bawahnya (rekursif), plus opsi 'Tanpa
+    Work Order' per proyek/sub-proyek yang punya pengeluaran tanpa WO."""
+    subtree_ids = await _project_subtree_ids(project_id)
+    projects_map = {p["id"]: p["name"] for p in await db.projects.find({"id": {"$in": subtree_ids}}).to_list(1000)}
+    work_orders = await db.work_orders.find({"project_id": {"$in": subtree_ids}}).sort("created_at", 1).to_list(2000)
+    all_exp = await db.expenses.find({"project_id": {"$in": subtree_ids}}).to_list(5000)
+
+    options = []
+    for w in work_orders:
+        exps = [e for e in all_exp if e.get("work_order_id") == w["id"]]
+        total = sum(e.get("amount", 0) for e in exps)
+        options.append({
+            "id": w["id"], "label": w["name"], "group": projects_map.get(w["project_id"], ""),
+            "sub": f"{len(exps)} transaksi · {rupiah(total)}",
+        })
+    for pid in subtree_ids:
+        unassigned = [e for e in all_exp if e.get("project_id") == pid and not e.get("work_order_id")]
+        if unassigned:
+            total = sum(e.get("amount", 0) for e in unassigned)
+            options.append({
+                "id": f"__unassigned__:{pid}", "label": "Tanpa Work Order", "group": projects_map.get(pid, ""),
+                "sub": f"{len(unassigned)} transaksi · {rupiah(total)}",
+            })
+    return options
+
+
 @api_router.get("/projects/{project_id}/pdf")
 async def project_pdf(project_id: str, work_order_ids: Optional[str] = Query(None)):
     proj = await db.projects.find_one({"id": project_id})
     if not proj:
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
 
-    work_orders = await db.work_orders.find({"project_id": project_id}).sort("created_at", 1).to_list(2000)
-    all_exp = await db.expenses.find({"project_id": project_id}).sort("date", 1).to_list(5000)
+    # Laporan turun ke SELURUH hierarki (proyek ini + semua sub-proyek di
+    # bawahnya), bukan cuma work order yang menempel langsung ke proyek ini —
+    # supaya proyek yang semua pengeluarannya ada di dalam sub-proyek tetap
+    # bisa menghasilkan laporan yang lengkap, bukan kosong.
+    subtree_ids = await _project_subtree_ids(project_id)
+    projects_map = {p["id"]: p["name"] for p in await db.projects.find({"id": {"$in": subtree_ids}}).to_list(1000)}
+    work_orders = await db.work_orders.find({"project_id": {"$in": subtree_ids}}).sort("created_at", 1).to_list(2000)
+    all_exp = await db.expenses.find({"project_id": {"$in": subtree_ids}}).sort("date", 1).to_list(5000)
 
-    # work_order_ids: daftar id WO yang dipilih user (pisah koma), plus sentinel
-    # "__unassigned__" untuk menyertakan pengeluaran tanpa WO. Kalau parameter ini
-    # tidak dikirim sama sekali, default-nya sertakan semua (perilaku lama).
-    include_unassigned = True
+    # work_order_ids: daftar pilihan (id WO asli, atau token "__unassigned__:<id proyek>"
+    # untuk pengeluaran tanpa WO di proyek/sub-proyek tertentu), dipisah koma.
+    # Kalau parameter ini tidak dikirim sama sekali, default-nya sertakan semua.
+    selected = None
     if work_order_ids is not None:
         selected = set(x for x in work_order_ids.split(",") if x)
-        include_unassigned = "__unassigned__" in selected
         work_orders = [w for w in work_orders if w["id"] in selected]
+
+    def wo_group_name(w):
+        pname = projects_map.get(w["project_id"], "")
+        base = f"Work Order: {w['name']}"
+        return f"{base} ({pname})" if pname and pname != proj["name"] else base
 
     groups = []
     for w in work_orders:
-        groups.append({"name": f"Work Order: {w['name']}",
+        groups.append({"name": wo_group_name(w),
                        "expenses": [e for e in all_exp if e.get("work_order_id") == w["id"]]})
-    unassigned = [e for e in all_exp if not e.get("work_order_id")]
-    if unassigned and include_unassigned:
-        groups.append({"name": "Tanpa Work Order", "expenses": unassigned})
+
+    for pid in subtree_ids:
+        token = f"__unassigned__:{pid}"
+        if selected is not None and token not in selected:
+            continue
+        unassigned = [e for e in all_exp if e.get("project_id") == pid and not e.get("work_order_id")]
+        if not unassigned:
+            continue
+        pname = projects_map.get(pid, "")
+        label = "Tanpa Work Order" if pid == project_id else f"Tanpa Work Order ({pname})"
+        groups.append({"name": label, "expenses": unassigned})
 
     included_exp = [e for g in groups for e in g["expenses"]]
     receipts = await _gather_receipts(included_exp)

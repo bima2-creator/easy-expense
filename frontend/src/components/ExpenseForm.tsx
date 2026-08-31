@@ -118,9 +118,10 @@ export default function ExpenseForm({
         <TextInput
           testID="form-vendor-input"
           value={value.vendor}
-          onChangeText={(t) => onChange({ vendor: t })}
-          placeholder="mis. Warteg Bahari"
+          onChangeText={(t) => onChange({ vendor: t.toUpperCase() })}
+          placeholder="mis. WARTEG BAHARI"
           placeholderTextColor={colors.muted}
+          autoCapitalize="characters"
           style={styles.input}
         />
       </Field>
@@ -283,8 +284,9 @@ export default function ExpenseForm({
         visible={modal === "project"}
         title="Proyek Baru"
         subtitle="Kelompokkan pengeluaran per proyek"
-        placeholder="mis. Proyek Gedung A"
+        placeholder="mis. PROYEK GEDUNG A"
         confirmLabel="Buat"
+        uppercase
         onClose={() => setModal(null)}
         onSubmit={addProject}
       />
@@ -292,8 +294,9 @@ export default function ExpenseForm({
         visible={modal === "subproject"}
         title="Sub-Proyek Baru"
         subtitle="Pecah proyek jadi beberapa lokasi/site"
-        placeholder="mis. Site Jakarta"
+        placeholder="mis. SITE JAKARTA"
         confirmLabel="Buat"
+        uppercase
         onClose={() => setModal(null)}
         onSubmit={addSubProject}
       />
@@ -301,8 +304,9 @@ export default function ExpenseForm({
         visible={modal === "workorder"}
         title="Work Order Baru"
         subtitle="Rincian pekerjaan dalam proyek"
-        placeholder="mis. WO-001 Instalasi"
+        placeholder="mis. WO-001 INSTALASI"
         confirmLabel="Buat"
+        uppercase
         onClose={() => setModal(null)}
         onSubmit={addWorkOrder}
       />

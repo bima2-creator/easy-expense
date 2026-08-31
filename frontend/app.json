@@ -23,7 +23,10 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "id.co.bitech.financeapp",
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -62,6 +65,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cccb1084-167b-418e-9691-973f060f11f6"
+      }
     }
   }
 }

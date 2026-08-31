@@ -49,6 +49,9 @@ export const api = {
   async projects(): Promise<Project[]> { return j(await get(`/projects`)); },
   async subProjects(parentId: string): Promise<Project[]> { return j(await get(`/projects?parent_id=${encodeURIComponent(parentId)}`)); },
   async getProject(id: string): Promise<Project> { return j(await get(`/projects/${id}`)); },
+  async reportOptions(projectId: string): Promise<{ id: string; label: string; group: string; sub: string }[]> {
+    return j(await get(`/projects/${projectId}/report-options`));
+  },
   async createProject(name: string, client?: string, parentId?: string): Promise<Project> {
     return j(await post("/projects", { name, client, parent_id: parentId }));
   },

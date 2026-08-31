@@ -49,10 +49,11 @@ export default function CategoryFormModal({
             <TextInput
               testID="category-form-name"
               value={name}
-              onChangeText={setName}
-              placeholder="mis. Parkir"
+              onChangeText={(t) => setName(t.toUpperCase())}
+              placeholder="mis. PARKIR"
               placeholderTextColor={colors.muted}
               autoFocus
+              autoCapitalize="characters"
               style={styles.input}
               onSubmitEditing={submit}
               returnKeyType="done"

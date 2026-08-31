@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +16,8 @@ import ConfirmModal from "@/src/components/ConfirmModal";
 import WorkOrderPickerModal from "@/src/components/WorkOrderPickerModal";
 import { useToast } from "@/src/components/Toast";
 
+const UNASSIGNED_KEY = "__unassigned__";
+
 export default function ProjectDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -28,8 +30,6 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerOptions, setPickerOptions] = useState<{ id: string; label: string; group: string; sub: string }[]>([]);
-  const [loadingOptions, setLoadingOptions] = useState(false);
   const [addWO, setAddWO] = useState(false);
   const [addSub, setAddSub] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -49,19 +49,13 @@ export default function ProjectDetail() {
 
   const total = project?.total ?? 0;
 
-  // Daftar checklist WO untuk laporan diambil dari backend supaya mencakup
-  // seluruh sub-proyek (bukan cuma WO langsung di proyek ini).
-  const openPicker = async () => {
-    setLoadingOptions(true);
-    try {
-      setPickerOptions(await api.reportOptions(id!));
-      setPickerOpen(true);
-    } catch {
-      toast("Gagal memuat daftar work order", "error");
-    } finally {
-      setLoadingOptions(false);
-    }
-  };
+  const pickerOptions = useMemo(
+    () => [
+      ...workOrders.map((w) => ({ id: w.id, label: w.name, sub: `${w.expense_count ?? 0} transaksi · ${formatMoney(w.total ?? 0)}` })),
+      { id: UNASSIGNED_KEY, label: "Tanpa Work Order", sub: "Pengeluaran yang belum diberi WO" },
+    ],
+    [workOrders],
+  );
 
   const createWO = async (name: string) => {
     try { await api.createWorkOrder(id!, name); Haptics.selectionAsync(); setAddWO(false); load(); }
@@ -228,8 +222,8 @@ export default function ProjectDetail() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Pressable testID="export-pdf" onPress={openPicker} disabled={exporting || loadingOptions} style={styles.pdfBtn}>
-          {loadingOptions ? <ActivityIndicator color={colors.onSurfaceInverse} /> : exporting ? <ActivityIndicator color={colors.onSurfaceInverse} /> : (
+        <Pressable testID="export-pdf" onPress={() => setPickerOpen(true)} disabled={exporting} style={styles.pdfBtn}>
+          {exporting ? <ActivityIndicator color={colors.onSurfaceInverse} /> : (
             <>
               <Ionicons name="document-text-outline" size={18} color={colors.onSurfaceInverse} />
               <Text style={styles.pdfText}>Ekspor Laporan PDF</Text>
@@ -245,9 +239,9 @@ export default function ProjectDetail() {
         onConfirm={exportPdf}
       />
 
-      <InputModal visible={addWO} title="Work Order Baru" placeholder="mis. WO-001 INSTALASI" confirmLabel="Buat" uppercase onClose={() => setAddWO(false)} onSubmit={createWO} />
-      <InputModal visible={addSub} title="Sub-Proyek Baru" placeholder="mis. SITE JAKARTA" confirmLabel="Buat" uppercase onClose={() => setAddSub(false)} onSubmit={createSubProject} />
-      <InputModal visible={renaming} title="Ubah Nama Proyek" placeholder="Nama proyek" initialValue={project.name} confirmLabel="Simpan" uppercase onClose={() => setRenaming(false)} onSubmit={rename} />
+      <InputModal visible={addWO} title="Work Order Baru" placeholder="mis. WO-001 Instalasi" confirmLabel="Buat" onClose={() => setAddWO(false)} onSubmit={createWO} />
+      <InputModal visible={addSub} title="Sub-Proyek Baru" placeholder="mis. Site Jakarta" confirmLabel="Buat" onClose={() => setAddSub(false)} onSubmit={createSubProject} />
+      <InputModal visible={renaming} title="Ubah Nama Proyek" placeholder="Nama proyek" initialValue={project.name} confirmLabel="Simpan" onClose={() => setRenaming(false)} onSubmit={rename} />
       <ConfirmModal visible={confirmDel} title="Hapus proyek?" message="Semua work order akan dihapus. Pengeluaran akan dilepas dari proyek ini. Sub-proyek di dalamnya tidak ikut terhapus, cuma naik jadi proyek tersendiri." onClose={() => setConfirmDel(false)} onConfirm={remove} />
     </View>
   );

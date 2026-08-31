@@ -92,9 +92,8 @@ export default function Projects() {
         visible={showAdd}
         title="Proyek Baru"
         subtitle="Kelompokkan work order & pengeluaran"
-        placeholder="mis. PROYEK GEDUNG A"
+        placeholder="mis. Proyek Gedung A"
         confirmLabel="Buat"
-        uppercase
         onClose={() => setShowAdd(false)}
         onSubmit={addProject}
       />

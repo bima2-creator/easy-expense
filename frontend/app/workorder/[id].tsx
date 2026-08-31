@@ -174,7 +174,7 @@ export default function WorkOrderDetail() {
         </Pressable>
       </View>
 
-      <InputModal visible={renaming} title="Ubah Nama Work Order" placeholder="Nama work order" initialValue={wo.name} confirmLabel="Simpan" onClose={() => setRenaming(false)} onSubmit={rename} />
+      <InputModal visible={renaming} title="Ubah Nama Work Order" placeholder="Nama work order" initialValue={wo.name} confirmLabel="Simpan" uppercase onClose={() => setRenaming(false)} onSubmit={rename} />
       <ConfirmModal visible={confirmDel} title="Hapus work order?" message="Pengeluaran akan dilepas dari work order ini (tetap tersimpan)." onClose={() => setConfirmDel(false)} onConfirm={remove} />
     </View>
   );
