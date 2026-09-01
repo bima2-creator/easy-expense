@@ -787,15 +787,25 @@ async def get_file(path: str):
 # Expenses
 # ---------------------------------------------------------------------------
 async def _scope_is_paid(project_id: Optional[str], work_order_id: Optional[str]) -> bool:
-    """Cek apakah WO atau Proyek/Sub-Proyek tujuan sudah ditandai lunas.
-    WO diprioritaskan kalau ada (expense di bawah WO ikut status WO-nya,
-    bukan status proyek induknya)."""
+    """Cek apakah pengeluaran ini sudah 'lunas': WO-nya sendiri ditandai lunas,
+    ATAU proyek/sub-proyek langsungnya, ATAU proyek induk MANA PUN di atasnya
+    (kalau proyek induk ditandai lunas, semua turunannya — termasuk isi WO
+    di dalam sub-proyek — ikut dianggap lunas juga)."""
     if work_order_id:
         wo = await db.work_orders.find_one({"id": work_order_id})
-        return bool(wo and wo.get("is_paid"))
-    if project_id:
-        proj = await db.projects.find_one({"id": project_id})
-        return bool(proj and proj.get("is_paid"))
+        if wo and wo.get("is_paid"):
+            return True
+        project_id = wo.get("project_id") if wo else project_id
+    pid = project_id
+    seen = set()
+    while pid and pid not in seen:
+        seen.add(pid)
+        proj = await db.projects.find_one({"id": pid})
+        if not proj:
+            break
+        if proj.get("is_paid"):
+            return True
+        pid = proj.get("parent_id")
     return False
 
 
@@ -838,26 +848,37 @@ async def list_expenses(
         q["date"] = date_q
     docs = await db.expenses.find(q).sort("date", -1).to_list(2000)
 
-    wo_ids = {d["work_order_id"] for d in docs if d.get("work_order_id")}
-    proj_ids = {d["project_id"] for d in docs if d.get("project_id") and not d.get("work_order_id")}
-    wo_paid = {}
-    if wo_ids:
-        for w in await db.work_orders.find({"id": {"$in": list(wo_ids)}}).to_list(2000):
-            wo_paid[w["id"]] = bool(w.get("is_paid"))
-    proj_paid = {}
-    if proj_ids:
-        for p in await db.projects.find({"id": {"$in": list(proj_ids)}}).to_list(2000):
-            proj_paid[p["id"]] = bool(p.get("is_paid"))
+    # Ambil semua WO & proyek sekali saja, lalu hitung status lunas di memori
+    # (termasuk menelusuri rantai proyek induk) — supaya tidak query berkali-
+    # kali per baris pengeluaran.
+    all_wos = {w["id"]: w for w in await db.work_orders.find().to_list(5000)}
+    all_projects = {p["id"]: p for p in await db.projects.find().to_list(2000)}
+
+    def project_chain_paid(pid):
+        seen = set()
+        while pid and pid not in seen:
+            seen.add(pid)
+            proj = all_projects.get(pid)
+            if not proj:
+                return False
+            if proj.get("is_paid"):
+                return True
+            pid = proj.get("parent_id")
+        return False
 
     result = []
     for d in docs:
+        wo_id = d.get("work_order_id")
+        proj_id = d.get("project_id")
+        locked = False
+        if wo_id:
+            wo = all_wos.get(wo_id)
+            if wo:
+                locked = bool(wo.get("is_paid")) or project_chain_paid(wo.get("project_id"))
+        elif proj_id:
+            locked = project_chain_paid(proj_id)
         e = Expense(**d).dict()
-        if d.get("work_order_id"):
-            e["locked"] = wo_paid.get(d["work_order_id"], False)
-        elif d.get("project_id"):
-            e["locked"] = proj_paid.get(d["project_id"], False)
-        else:
-            e["locked"] = False
+        e["locked"] = locked
         result.append(e)
     return result
 
