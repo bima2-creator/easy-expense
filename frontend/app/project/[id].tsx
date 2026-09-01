@@ -84,21 +84,6 @@ export default function ProjectDetail() {
     } catch { toast("Gagal menghapus", "error"); }
   };
 
-  const togglePaid = async () => {
-    if (!project) return;
-    const next = !project.is_paid;
-    setProject({ ...project, is_paid: next });
-    try {
-      await api.updateProject(id!, { is_paid: next });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      toast(next ? "Proyek ditandai lunas" : "Ditandai belum dibayar", "success");
-      load();
-    } catch (e: any) {
-      setProject({ ...project, is_paid: !next });
-      toast(e?.message || "Gagal mengubah status pembayaran", "error");
-    }
-  };
-
   const exportPdf = async (selectedIds: string[]) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPickerOpen(false);
@@ -144,20 +129,6 @@ export default function ProjectDetail() {
           <Text style={styles.totalLabel}>TOTAL PENGELUARAN</Text>
           <Text style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(total)}</Text>
         </View>
-
-        <Pressable testID="project-toggle-paid" onPress={togglePaid} style={[styles.paidBadge, project.is_paid ? styles.paidBadgeOn : styles.paidBadgeOff]}>
-          <Ionicons name={project.is_paid ? "checkmark-circle" : "time-outline"} size={18} color={project.is_paid ? colors.success : colors.warning} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.paidBadgeTitle, { color: project.is_paid ? colors.success : colors.warning }]}>
-              {project.is_paid ? "Sudah Dibayar" : "Belum Dibayar"}
-            </Text>
-            <Text style={styles.paidBadgeSub}>
-              {project.is_paid
-                ? "Pengeluaran langsung di proyek ini terkunci · ketuk untuk batalkan"
-                : "Untuk pengeluaran langsung di proyek ini (bukan lewat WO) · ketuk untuk tandai lunas"}
-            </Text>
-          </View>
-        </Pressable>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Sub-Proyek</Text>
@@ -284,9 +255,4 @@ const styles = StyleSheet.create({
   bottomBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   pdfBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brand, height: 52, borderRadius: radius.md },
   pdfText: { fontFamily: fonts.semibold, fontSize: type.lg, color: colors.onSurfaceInverse },
-  paidBadge: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.md },
-  paidBadgeOn: { borderColor: colors.success + "55", backgroundColor: colors.success + "14" },
-  paidBadgeOff: { borderColor: colors.warning + "55", backgroundColor: colors.warning + "14" },
-  paidBadgeTitle: { fontFamily: fonts.semibold, fontSize: type.base },
-  paidBadgeSub: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, marginTop: 2 },
 });

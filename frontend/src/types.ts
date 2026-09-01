@@ -14,8 +14,6 @@ export type Project = {
   client?: string;
   color?: string;
   parent_id?: string | null;
-  is_paid: boolean;
-  paid_at: string | null;
   created_at: string;
   work_order_count?: number;
   sub_project_count?: number;

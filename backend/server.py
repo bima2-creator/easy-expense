@@ -150,8 +150,6 @@ class Project(BaseModel):
     client: Optional[str] = ""
     color: Optional[str] = "#4A7C59"
     parent_id: Optional[str] = None  # kalau diisi, project ini adalah sub-proyek dari project lain
-    is_paid: bool = False  # untuk pengeluaran yang langsung di bawah proyek/sub-proyek (tanpa WO)
-    paid_at: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -166,7 +164,6 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     client: Optional[str] = None
     color: Optional[str] = None
-    is_paid: Optional[bool] = None
 
 
 class WorkOrder(BaseModel):
@@ -620,10 +617,7 @@ async def update_project(project_id: str, body: ProjectUpdate):
     doc = await db.projects.find_one({"id": project_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Proyek tidak ditemukan")
-    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if k != "is_paid"}
-    if body.is_paid is not None:
-        updates["is_paid"] = body.is_paid
-        updates["paid_at"] = now_iso() if body.is_paid else None
+    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
     if updates:
         await db.projects.update_one({"id": project_id}, {"$set": updates})
     doc = await db.projects.find_one({"id": project_id})
@@ -787,25 +781,12 @@ async def get_file(path: str):
 # Expenses
 # ---------------------------------------------------------------------------
 async def _scope_is_paid(project_id: Optional[str], work_order_id: Optional[str]) -> bool:
-    """Cek apakah pengeluaran ini sudah 'lunas': WO-nya sendiri ditandai lunas,
-    ATAU proyek/sub-proyek langsungnya, ATAU proyek induk MANA PUN di atasnya
-    (kalau proyek induk ditandai lunas, semua turunannya — termasuk isi WO
-    di dalam sub-proyek — ikut dianggap lunas juga)."""
+    """Cek apakah pengeluaran ini sudah 'lunas'. Status lunas cuma ada di level
+    Work Order — proyek/sub-proyek sengaja tidak punya status lunas sendiri,
+    karena sifatnya wadah yang terus bertambah WO baru dari waktu ke waktu."""
     if work_order_id:
         wo = await db.work_orders.find_one({"id": work_order_id})
-        if wo and wo.get("is_paid"):
-            return True
-        project_id = wo.get("project_id") if wo else project_id
-    pid = project_id
-    seen = set()
-    while pid and pid not in seen:
-        seen.add(pid)
-        proj = await db.projects.find_one({"id": pid})
-        if not proj:
-            break
-        if proj.get("is_paid"):
-            return True
-        pid = proj.get("parent_id")
+        return bool(wo and wo.get("is_paid"))
     return False
 
 
@@ -848,35 +829,14 @@ async def list_expenses(
         q["date"] = date_q
     docs = await db.expenses.find(q).sort("date", -1).to_list(2000)
 
-    # Ambil semua WO & proyek sekali saja, lalu hitung status lunas di memori
-    # (termasuk menelusuri rantai proyek induk) — supaya tidak query berkali-
-    # kali per baris pengeluaran.
+    # Ambil semua WO sekali saja, lalu hitung status lunas di memori (status
+    # lunas cuma ada di level Work Order, proyek/sub-proyek tidak punya).
     all_wos = {w["id"]: w for w in await db.work_orders.find().to_list(5000)}
-    all_projects = {p["id"]: p for p in await db.projects.find().to_list(2000)}
-
-    def project_chain_paid(pid):
-        seen = set()
-        while pid and pid not in seen:
-            seen.add(pid)
-            proj = all_projects.get(pid)
-            if not proj:
-                return False
-            if proj.get("is_paid"):
-                return True
-            pid = proj.get("parent_id")
-        return False
 
     result = []
     for d in docs:
         wo_id = d.get("work_order_id")
-        proj_id = d.get("project_id")
-        locked = False
-        if wo_id:
-            wo = all_wos.get(wo_id)
-            if wo:
-                locked = bool(wo.get("is_paid")) or project_chain_paid(wo.get("project_id"))
-        elif proj_id:
-            locked = project_chain_paid(proj_id)
+        locked = bool(all_wos.get(wo_id, {}).get("is_paid")) if wo_id else False
         e = Expense(**d).dict()
         e["locked"] = locked
         result.append(e)
