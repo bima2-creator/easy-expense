@@ -57,7 +57,7 @@ export default function ExpenseDetail() {
     setSaving(true);
     try {
       await api.updateExpense(id!, {
-        vendor: form.vendor.trim() || "Vendor Tidak Diketahui",
+        vendor: (form.vendor.trim() || "Vendor Tidak Diketahui").toUpperCase(),
         amount: Number(form.amount),
         date: form.date,
         category: form.category,

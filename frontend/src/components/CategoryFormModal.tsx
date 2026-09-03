@@ -36,7 +36,7 @@ export default function CategoryFormModal({
 
   const submit = () => {
     const v = name.trim();
-    if (v) onSubmit(v, icon);
+    if (v) onSubmit(v.toUpperCase(), icon);
   };
 
   return (
@@ -49,11 +49,12 @@ export default function CategoryFormModal({
             <TextInput
               testID="category-form-name"
               value={name}
-              onChangeText={(t) => setName(t.toUpperCase())}
+              onChangeText={setName}
               placeholder="mis. PARKIR"
               placeholderTextColor={colors.muted}
               autoFocus
               autoCapitalize="characters"
+              autoCorrect={false}
               style={styles.input}
               onSubmitEditing={submit}
               returnKeyType="done"

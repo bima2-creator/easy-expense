@@ -35,7 +35,7 @@ export default function InputModal({
 
   const submit = () => {
     const v = value.trim();
-    if (v) onSubmit(v);
+    if (v) onSubmit(uppercase ? v.toUpperCase() : v);
   };
 
   return (
@@ -48,11 +48,12 @@ export default function InputModal({
             <TextInput
               testID="input-modal-field"
               value={value}
-              onChangeText={(t) => setValue(uppercase ? t.toUpperCase() : t)}
+              onChangeText={setValue}
               placeholder={placeholder}
               placeholderTextColor={colors.muted}
               autoFocus
               autoCapitalize={uppercase ? "characters" : "sentences"}
+              autoCorrect={!uppercase}
               style={styles.input}
               onSubmitEditing={submit}
               returnKeyType="done"

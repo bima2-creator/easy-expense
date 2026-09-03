@@ -35,7 +35,7 @@ export default function AddExpense() {
     setSaving(true);
     try {
       await api.createExpense({
-        vendor: form.vendor.trim() || "Vendor Tidak Diketahui",
+        vendor: (form.vendor.trim() || "Vendor Tidak Diketahui").toUpperCase(),
         amount: Number(form.amount),
         date: form.date,
         category: form.category,

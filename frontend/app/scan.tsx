@@ -78,7 +78,7 @@ export default function Scan() {
       setDuplicate(res.duplicate || null);
       setForm((f) => ({
         ...f,
-        vendor: ex.vendor || "",
+        vendor: (ex.vendor || "").toUpperCase(),
         amount: ex.amount ? String(Math.round(ex.amount)) : "",
         date: ex.date || todayISO(),
         category: ex.category || categories[0]?.name || "Makan",
@@ -179,7 +179,7 @@ export default function Scan() {
     setSaving(true);
     try {
       await api.createExpense({
-        vendor: form.vendor.trim() || "Vendor Tidak Diketahui",
+        vendor: (form.vendor.trim() || "Vendor Tidak Diketahui").toUpperCase(),
         amount: Number(form.amount),
         date: form.date,
         category: form.category,

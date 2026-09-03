@@ -118,10 +118,11 @@ export default function ExpenseForm({
         <TextInput
           testID="form-vendor-input"
           value={value.vendor}
-          onChangeText={(t) => onChange({ vendor: t.toUpperCase() })}
+          onChangeText={(t) => onChange({ vendor: t })}
           placeholder="mis. WARTEG BAHARI"
           placeholderTextColor={colors.muted}
           autoCapitalize="characters"
+          autoCorrect={false}
           style={styles.input}
         />
       </Field>
