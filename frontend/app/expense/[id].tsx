@@ -14,6 +14,7 @@ import { colors, fonts, spacing, radius, type, shadow } from "@/src/theme";
 import { useCategories } from "@/src/categories";
 import ExpenseForm, { FormState } from "@/src/components/ExpenseForm";
 import ConfirmModal from "@/src/components/ConfirmModal";
+import ReceiptPreviewModal from "@/src/components/ReceiptPreviewModal";
 import { useToast } from "@/src/components/Toast";
 
 export default function ExpenseDetail() {
@@ -28,6 +29,7 @@ export default function ExpenseDetail() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -95,7 +97,13 @@ export default function ExpenseDetail() {
     <View style={styles.screen}>
       <View style={styles.heroWrap}>
         {hasReceipt ? (
-          <Image source={{ uri: fileUrl(expense.receipt_path), headers: API_KEY_HEADERS }} style={styles.hero} contentFit="cover" transition={200} />
+          <Pressable testID="receipt-preview-open" onPress={() => setPreviewOpen(true)} style={styles.hero}>
+            <Image source={{ uri: fileUrl(expense.receipt_path), headers: API_KEY_HEADERS }} style={styles.hero} contentFit="cover" transition={200} />
+            <View style={styles.zoomHint}>
+              <Ionicons name="expand-outline" size={14} color="#fff" />
+              <Text style={styles.zoomHintText}>Ketuk untuk perbesar</Text>
+            </View>
+          </Pressable>
         ) : (
           <View style={[styles.hero, styles.heroPlaceholder, { backgroundColor: meta.color + "22" }]}>
             <Ionicons name={meta.icon} size={56} color={meta.color} />
@@ -143,6 +151,14 @@ export default function ExpenseDetail() {
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />
+      {hasReceipt && (
+        <ReceiptPreviewModal
+          visible={previewOpen}
+          uri={fileUrl(expense.receipt_path)}
+          headers={API_KEY_HEADERS}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </View>
   );
 }
@@ -153,6 +169,11 @@ const styles = StyleSheet.create({
   heroWrap: { height: "34%", backgroundColor: colors.surfaceInverse },
   hero: { width: "100%", height: "100%" },
   heroPlaceholder: { alignItems: "center", justifyContent: "center" },
+  zoomHint: {
+    position: "absolute", bottom: spacing.md, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+  },
+  zoomHintText: { fontFamily: fonts.medium, fontSize: type.sm, color: "#fff" },
   topScrim: { position: "absolute", top: 0, left: 0, right: 0, height: 120 },
   heroTop: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   roundBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
