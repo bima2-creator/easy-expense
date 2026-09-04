@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Switch, StyleSheet, Platform, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, Switch, StyleSheet, Platform, ActivityIndicator, TextInput } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +11,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { colors, fonts, spacing, radius, type } from "@/src/theme";
 import { useAppLock, LOCK_TIMEOUT_OPTIONS } from "@/src/applock";
 import { useCategories } from "@/src/categories";
-import { api, backupUrl, API_KEY_HEADERS } from "@/src/api";
+import { api, backupUrl, API_KEY_HEADERS, getBackendUrl, getDefaultBackendUrl, getApiKey, setBackendConfig, resetBackendConfig } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import InputModal from "@/src/components/InputModal";
 import ConfirmModal from "@/src/components/ConfirmModal";
@@ -29,6 +29,35 @@ export default function Settings() {
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreConfirm, setRestoreConfirm] = useState<{ uri: string; name: string } | null>(null);
+  const [backendUrlInput, setBackendUrlInput] = useState(getBackendUrl());
+  const [apiKeyInput, setApiKeyInput] = useState(getApiKey());
+  const [editingConnection, setEditingConnection] = useState(false);
+  const [savingConnection, setSavingConnection] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const isOverridden = getBackendUrl() !== getDefaultBackendUrl();
+
+  const saveConnection = async () => {
+    if (!backendUrlInput.trim()) { toast("URL backend tidak boleh kosong", "error"); return; }
+    setSavingConnection(true);
+    try {
+      await setBackendConfig(backendUrlInput, apiKeyInput);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast("Backend diganti — tutup & buka lagi app untuk memuat ulang data", "success");
+      setEditingConnection(false);
+    } catch {
+      toast("Gagal menyimpan", "error");
+    } finally {
+      setSavingConnection(false);
+    }
+  };
+
+  const doResetConnection = async () => {
+    setResetConfirm(false);
+    await resetBackendConfig();
+    setBackendUrlInput(getBackendUrl());
+    setApiKeyInput(getApiKey());
+    toast("Kembali ke backend default — tutup & buka lagi app", "success");
+  };
 
   const doBackup = async () => {
     setBackingUp(true);
@@ -200,6 +229,74 @@ export default function Settings() {
             Restore aman dijalankan berkali-kali — data tidak akan menjadi dobel.
           </Text>
         </View>
+
+        <Text style={styles.sectionTitle}>Koneksi Backend</Text>
+        <View style={styles.card}>
+          {!editingConnection ? (
+            <>
+              <View style={styles.cardRow}>
+                <Ionicons name="server-outline" size={20} color={colors.onSurface} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowText} numberOfLines={1}>{getBackendUrl() || "(belum diatur)"}</Text>
+                  {isOverridden && <Text style={styles.overrideTag}>Kustom, bukan default</Text>}
+                </View>
+              </View>
+              <View style={styles.divider} />
+              <Pressable testID="settings-edit-backend" onPress={() => setEditingConnection(true)} style={styles.cardRow}>
+                <Ionicons name="create-outline" size={20} color={colors.onSurface} />
+                <Text style={styles.rowText}>Ganti Backend</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+              {isOverridden && (
+                <>
+                  <View style={styles.divider} />
+                  <Pressable testID="settings-reset-backend" onPress={() => setResetConfirm(true)} style={styles.cardRow}>
+                    <Ionicons name="refresh-outline" size={20} color={colors.error} />
+                    <Text style={[styles.rowText, { color: colors.error }]}>Kembali ke Default</Text>
+                  </Pressable>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={styles.subLabel}>URL Backend</Text>
+              <TextInput
+                testID="settings-backend-url-input"
+                value={backendUrlInput}
+                onChangeText={setBackendUrlInput}
+                placeholder="http://192.168.1.10:8000"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.connectionInput}
+              />
+              <Text style={[styles.subLabel, { marginTop: spacing.md }]}>API Key</Text>
+              <TextInput
+                testID="settings-api-key-input"
+                value={apiKeyInput}
+                onChangeText={setApiKeyInput}
+                placeholder="Kunci API backend tujuan"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.connectionInput}
+              />
+              <View style={[styles.timeoutRow, { marginTop: spacing.lg }]}>
+                <Pressable testID="settings-cancel-backend" onPress={() => { setEditingConnection(false); setBackendUrlInput(getBackendUrl()); setApiKeyInput(getApiKey()); }} style={[styles.chip, { flex: 1, alignItems: "center" }]}>
+                  <Text style={styles.chipText}>Batal</Text>
+                </Pressable>
+                <Pressable testID="settings-save-backend" onPress={saveConnection} disabled={savingConnection} style={[styles.chip, styles.chipActive, { flex: 1, alignItems: "center" }]}>
+                  {savingConnection ? <ActivityIndicator size="small" color={colors.onSurfaceInverse} /> : <Text style={styles.chipTextActive}>Simpan</Text>}
+                </Pressable>
+              </View>
+            </>
+          )}
+          <Text style={styles.hint}>
+            Dipakai kalau server utama (VPS) sedang bermasalah — bisa dialihkan sementara ke backend lokal
+            (mis. http://IP-laptop:8000) selama HP & laptop satu WiFi. Setelah ganti, tutup app sepenuhnya lalu buka lagi.
+          </Text>
+        </View>
       </ScrollView>
 
       <InputModal
@@ -242,6 +339,14 @@ export default function Settings() {
         onClose={() => setRestoreConfirm(null)}
         onConfirm={doRestore}
       />
+      <ConfirmModal
+        visible={resetConfirm}
+        title="Kembali ke backend default?"
+        message="App akan pakai lagi URL & API key bawaan (bukan yang barusan Anda atur manual)."
+        confirmLabel="Kembali ke Default"
+        onClose={() => setResetConfirm(false)}
+        onConfirm={doResetConnection}
+      />
     </View>
   );
 }
@@ -259,6 +364,12 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.divider, marginHorizontal: -spacing.lg },
   subLabel: { fontFamily: fonts.medium, fontSize: type.sm, color: colors.muted, paddingTop: spacing.lg },
   hint: { fontFamily: fonts.regular, fontSize: type.sm, color: colors.muted, paddingVertical: spacing.md, lineHeight: 18 },
+  overrideTag: { fontFamily: fonts.medium, fontSize: 11, color: colors.warning, marginTop: 2 },
+  connectionInput: {
+    backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    fontFamily: fonts.medium, fontSize: type.base, color: colors.onSurface,
+  },
   timeoutRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingVertical: spacing.md },
   chip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },

@@ -1,14 +1,59 @@
 import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Category, Expense, Project, ScanResult, Summary, WorkOrder } from "./types";
 
-const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+const BACKEND_URL_KEY = "backend_url_override";
+const API_KEY_OVERRIDE_KEY = "api_key_override";
+const DEFAULT_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const DEFAULT_API_KEY = process.env.EXPO_PUBLIC_API_KEY || "";
+
+let BACKEND_URL = DEFAULT_BACKEND_URL;
+let BASE = `${BACKEND_URL}/api`;
 
 // Kunci API sendiri — melindungi backend dari akses publik tanpa perlu login.
-// Nilainya harus sama persis dengan API_KEY di backend/.env.
+// Nilainya harus sama persis dengan API_KEY di backend/.env yang sedang dituju.
 export const API_KEY_HEADERS: Record<string, string> = {};
-if (process.env.EXPO_PUBLIC_API_KEY) {
-  API_KEY_HEADERS["X-API-Key"] = process.env.EXPO_PUBLIC_API_KEY;
+function _applyApiKey(key: string) {
+  if (key) API_KEY_HEADERS["X-API-Key"] = key;
+  else delete API_KEY_HEADERS["X-API-Key"];
 }
+_applyApiKey(DEFAULT_API_KEY);
+
+// Backend URL & API key bisa diganti langsung dari Pengaturan (mis. pindah ke
+// server lokal kalau VPS sedang bermasalah) — tanpa perlu build APK baru,
+// karena tersimpan di AsyncStorage, bukan ikut ke-bundle permanen ke dalam APK.
+export function getBackendUrl() { return BACKEND_URL; }
+export function getDefaultBackendUrl() { return DEFAULT_BACKEND_URL; }
+export function getApiKey() { return API_KEY_HEADERS["X-API-Key"] || ""; }
+
+export async function setBackendConfig(url: string, apiKey: string) {
+  const cleanUrl = url.trim().replace(/\/+$/, "");
+  BACKEND_URL = cleanUrl;
+  BASE = `${cleanUrl}/api`;
+  _applyApiKey(apiKey.trim());
+  await AsyncStorage.setItem(BACKEND_URL_KEY, cleanUrl);
+  await AsyncStorage.setItem(API_KEY_OVERRIDE_KEY, apiKey.trim());
+}
+
+export async function resetBackendConfig() {
+  BACKEND_URL = DEFAULT_BACKEND_URL;
+  BASE = `${DEFAULT_BACKEND_URL}/api`;
+  _applyApiKey(DEFAULT_API_KEY);
+  await AsyncStorage.removeItem(BACKEND_URL_KEY);
+  await AsyncStorage.removeItem(API_KEY_OVERRIDE_KEY);
+}
+
+// Muat override tersimpan (kalau pernah diganti sebelumnya) begitu app dibuka.
+(async () => {
+  try {
+    const [savedUrl, savedKey] = await Promise.all([
+      AsyncStorage.getItem(BACKEND_URL_KEY),
+      AsyncStorage.getItem(API_KEY_OVERRIDE_KEY),
+    ]);
+    if (savedUrl) { BACKEND_URL = savedUrl; BASE = `${savedUrl}/api`; }
+    if (savedKey) _applyApiKey(savedKey);
+  } catch {}
+})();
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) {
